@@ -1,0 +1,12 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor state
+.idea/
+*.swp
+
+# Local environment files, which often hold secrets
+.env
+.env.*
+!.env.example

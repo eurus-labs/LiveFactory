@@ -1,0 +1,79 @@
+name: commits
+
+# Checks what reaches the default branch: the pull request title, which becomes the
+# subject of a squash merge, and every commit in the pull request.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    # Dependabot writes its own titles, which can run past 72 characters. Only it is
+    # exempt: any other bot or app is checked like a person.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the title, commit messages and attribution
+        env:
+          # Passed through the environment, never interpolated into the script:
+          # whoever opens the pull request writes these.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9][a-z0-9._/-]*\))?!?: [^[:space:]](.*[^.[:space:]])?$'
+          attribution='^co-authored-by:.*(claude|copilot|codex|chatgpt|anthropic|openai)|^claude-session:|generated[- ](with|by):? .*(claude|copilot|codex)|claude\.ai/code'
+          status=0
+
+          # Here-strings, not pipes: Actions runs this with pipefail, and grep -q exiting
+          # early on a long input would turn a match into a failed pipeline.
+          check_subject() {  # $1 names the source, $2 is the subject
+            if ! grep -Eq "$pattern" <<< "$2"; then
+              echo "::error::$1 is not a Conventional Commits subject (type(scope): imperative subject, no trailing period): $2"
+              status=1
+            elif [ "${#2}" -gt 72 ]; then
+              echo "::error::$1 has ${#2} characters; the limit is 72: $2"
+              status=1
+            fi
+          }
+
+          check_subject "The pull request title" "$PR_TITLE"
+          if grep -Eiq "$attribution" <<< "$PR_TITLE"$'\n'"$PR_BODY"; then
+            echo "::error::The pull request title or description carries AI or tool attribution; remove it."
+            status=1
+          fi
+
+          for sha in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
+            check_subject "Commit ${sha:0:7}" "$(git log -1 --format=%s "$sha")"
+            if grep -Eiq "$attribution" <<< "$(git log -1 --format=%B "$sha")"; then
+              echo "::error::Commit ${sha:0:7} carries AI or tool attribution; reword it without the trailer or footer."
+              status=1
+            fi
+          done
+
+          exit "$status"
+
+  # The one check a branch ruleset should require. Add every new job (build, test)
+  # to needs; the check name stays the same. always(): a skipped required check
+  # counts as passing, so this job must run and fail when anything above fails.
+  verify:
+    if: always()
+    needs: [conventional-commits]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every required job passed or was skipped for a bot
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in success|skipped) ;; *) exit 1 ;; esac
+          done
