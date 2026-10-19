@@ -1,0 +1,30 @@
+name: ci
+
+# This repository's own CI. Template creates it once and never updates it: add the
+# project's build and test jobs here, and list each one in verify's needs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # The check a branch ruleset should require, next to "commits / conventional-commits".
+  # Its name stays the same as jobs are added. always(): a skipped required check counts
+  # as passing, so this job must run and fail when anything it needs fails.
+  verify:
+    if: always()
+    # needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Every required job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: ${RESULTS:-none yet}"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

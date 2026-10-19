@@ -1,0 +1,20 @@
+# Copier template for eurus-labs repositories.
+#
+#   copier copy gh:eurus-labs/Template <dir>     # start a new repository
+#   copier update                                # pull a newer Template tag (Renovate does this)
+#
+# Two kinds of files:
+#   - managed: Template owns them and every update overwrites them. Do not edit them in a
+#     project: .github/instructions/org/, .github/workflows/commits.yml, renovate.json.
+#   - seed: written once on copy, then owned by the project and never touched again
+#     (_skip_if_exists below).
+_min_copier_version: "9.0.0"
+_answers_file: .copier-answers.yml
+
+_skip_if_exists:
+  - AGENTS.md
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+  - .gitignore
+  - .github/workflows/ci.yml

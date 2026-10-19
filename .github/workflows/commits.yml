@@ -1,0 +1,17 @@
+name: commits
+
+# Managed by eurus-labs/Template through Copier: do not edit in a project. The checks
+# live in one reusable workflow (Conventional Commits, no AI or tool attribution, GitHub
+# no-reply identities), so a fix there reaches every repository at once.
+# Its check is named "commits / conventional-commits"; require it in the ruleset next
+# to "verify".
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  commits:
+    uses: eurus-labs/.github/.github/workflows/commits.yml@v1
