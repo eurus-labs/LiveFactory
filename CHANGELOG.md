@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconciliation, workspace publishing, isolation and acceptance scenarios.
 - Target architecture for later rings, including self-improvement and release.
 - Architecture decision records 0001–0008.
+- Project description in the README and repository facts in AGENTS.md.
 
 ### Changed
 

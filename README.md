@@ -1,27 +1,34 @@
-# Project name
+# LiveFactory
 
-> **Created from the eurus-labs template?** Work through this list, then delete this note:
->
-> 1. Replace the title and the placeholder sections below.
-> 2. Fill in **This Repository** at the end of [`AGENTS.md`](AGENTS.md): stack, validation commands,
->    default branch.
-> 3. Add your build and test jobs under [`.github/workflows/`](.github/workflows/). The `commits`
->    workflow already checks pull request titles and commit messages.
-> 4. Check the copyright line in [`LICENSE`](LICENSE).
->
-> Issue forms, the pull request template, `CONTRIBUTING.md` and `SECURITY.md` come from the
-> organization's [.github](https://github.com/eurus-labs/.github) repository. Add your own only when this
-> project needs something different.
+LiveFactory is a software factory that turns requests into verified code changes under
+human control, and is designed to improve its own departments, workflows and core.
 
-One sentence: what this project does, and for whom.
+## Status
 
-## Use
+Design stage. There is no code yet. The design is in [`docs/`](docs/):
 
-How to install and run it.
+- [Ring 0 core specification](docs/spec/r0-core.md): the normative contract for the first
+  working version.
+- [Target architecture](docs/architecture/target.md): where later rings are heading,
+  including self-improvement and release.
+- [Architecture decision records](docs/adr/): each decision with its trade-offs.
+
+## How it works
+
+- **Core** is a small deterministic state machine. It dispatches work, applies
+  transitions and enforces guards. It never calls a model.
+- **Departments** do the thinking: understanding and planning, implementation,
+  verification and review. They run as sandboxed, short-lived systemd units.
+- **Humans** approve direction, plans and every change to the factory itself. The factory
+  can improve itself, but it cannot change its own human gates.
+
+Ring 0 targets one Linux host with systemd: one local request, one human approval, one
+verified change candidate with evidence.
 
 ## Develop
 
-The commands to run before opening a pull request: lint, test, build.
+Nothing to build or test yet. Contribution rules, commit conventions and validation
+steps are in [`AGENTS.md`](AGENTS.md).
 
 ## License
 
