@@ -21,7 +21,7 @@ check. The owner works in Python.
   explicit `BEGIN IMMEDIATE`), never the legacy implicit-transaction mode.
 - The DB runs on a dedicated writer thread so a hung query does not block health checks.
 - Core keeps third-party dependencies to a minimum.
-- The supervisor's language is decided in Ring 2. A static binary (Go or Rust) is
+- The supervisor's language is decided before build step 4 (ADR-0009). A static binary (Go or Rust) is
   favoured because the supervisor must survive a broken Python environment.
 
 ## Consequences

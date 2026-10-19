@@ -20,21 +20,28 @@ publishing.
 
 ## 1. Profile and minimum value
 
-R0 delivers one feature end to end: **one local request → one human approval →
-a verified change candidate with evidence**.
+R0 is **self-hosting** ([ADR-0009](../adr/0009-self-hosting-first-ring.md)). It
+delivers one feature end to end: **an improvement from the backlog → one human approval
+→ a verified candidate of LiveFactory itself → a human release decision → activation by
+the supervisor, with recovery if it fails**.
 
 The R0 profile is fixed:
 
-- Linux with systemd as the service manager; one host; one repository under work.
+- Linux with systemd as the service manager; one host; the repository under work is
+  LiveFactory itself.
 - One core process, which is the only writer of the Operational Store (SQLite).
 - At most one worker attempt executing at a time.
-- One workflow definition: the Compact request workflow (§9).
-- Effects are limited to the attempt's own workspace and calls through the model gateway.
-  No push, publish, deploy or other external mutation.
+- One workflow definition: the Compact improvement workflow (§9).
+- Worker effects are limited to the attempt's own workspace and calls through the model
+  gateway. The only other effect is activation, performed by the supervisor after a human
+  release decision. No push, publish or deploy.
 
-Explicitly deferred: supervisor, Release Store, self-improvement activation, leases and
-heartbeats, multiple workers, a web console, dynamic plugins, automatic knowledge
-indexing, artifact garbage collection and high availability.
+Explicitly deferred: the user-request workflow (Ring 1), leases and heartbeats, multiple
+workers, a web console, dynamic plugins, automatic knowledge indexing, artifact garbage
+collection, breaking schema migrations and high availability.
+
+**Bootstrap.** Until the loop above works, humans with Claude Code build the factory
+outside the factory.
 
 ## 2. Terms
 
@@ -78,17 +85,23 @@ flowchart TD
 | Publisher | Moving output into the artifact store after the worker stops ([ADR-0003](../adr/0003-workspace-output-publishing.md)) | Execute anything from the workspace |
 | Artifact store | `candidates.git` for code and a sha256 object store for everything else | Overwrite or delete an object in R0 |
 | Maintenance commands | Backup, restore, integrity checks, manual rollback | Replay the outbox after a restore |
+| Supervisor | Activation, observation and recovery of an approved release (§12a) | Review source, call a model, coordinate work |
+| Release Store | A directory of immutable bundles plus an activation journal | Live inside the Operational Store |
+| Benchmark harness | Replaying the fixed task set against baseline and candidate | Be changed by the candidate it measures |
+
+The supervisor, Release Store, benchmark harness and its task set belong to the protected
+set. The CLI talks to the supervisor through its own socket, never through core.
 
 ### 3.1. Departments in R0
 
-1. **Understand & Plan**: triage, clarification, direction and plan; returns one decision
-   packet.
+1. **Understand & Plan**: acts as Factory Engineering. Reads the improvement backlog,
+   clarifies, proposes direction and plan; returns one decision packet.
 2. **Implementation**: executes the approved plan in its workspace and commits there.
 3. **Verification & Review**: runs trusted deterministic checks (tests, lint, type checks)
    and an LLM review as a secondary signal. Its assignment and evidence namespace are
    separate from Implementation's.
 
-Delivery in R0 is the CLI exporting the approved candidate and its report.
+There is no Delivery department in R0; delivery is activation (§12a).
 
 ## 4. Records
 
@@ -294,28 +307,33 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
   the last packet, key evidence, what is unverified, and impact when relevant. Its format
   belongs to the protected set ([ADR-0005](../adr/0005-self-improvement-scope.md)).
 
-Request workflow in R0:
+Improvement workflow in R0:
 
 ```mermaid
 flowchart TD
-    A["Request"] --> UP["Understand & Plan"]
-    UP -->|"Out of scope"| ST["Termination protocol"]
+    A["Backlog item"] --> UP["Understand & Plan"]
+    UP -->|"Not suitable"| ST["Termination protocol"]
     UP -->|"Packet: profile + direction + plan"| HG{"Human gate"}
     HG -->|"Clarify or revise"| UP
     HG -->|"Reject"| ST
     HG -->|"Approve current revisions"| I["Implementation"]
-    I --> V{"Verification & Review"}
-    V -->|"Pass"| D["Export candidate and report"]
+    I --> V{"Verification, benchmark & review"}
     V -->|"Changes required"| L{"Stage executions left?"}
     L -->|"Yes"| I
     L -->|"No"| BL["blocked: needs decision"]
     V -->|"Scope change"| UP
-    D --> OK["succeeded"]
+    V -->|"Pass"| W["blocked: external_release_pending"]
+    W -->|"Supervisor receipt"| R{"Release outcome"}
+    R -->|"Rejected"| ST
+    R -->|"Activated"| OK["succeeded"]
+    R -->|"Failed, recovered"| F["failed: activation_failed_recovered"]
+    R -->|"Maintenance"| BL
     C["Cancel at any non-terminal step"] --> ST
     ST --> END["rejected, cancelled or failed"]
 ```
 
-`succeeded` means a verified candidate exists. It does not mean merged or deployed.
+The release gate is not a core gate: the human decides through the supervisor and core
+only records the receipt ([ADR-0004](../adr/0004-release-authority.md)).
 
 ## 10. Local execution
 
@@ -382,6 +400,36 @@ changes are never published.
 
 R0 performs no artifact garbage collection.
 
+## 12a. Release and activation
+
+Release authority follows [ADR-0004](../adr/0004-release-authority.md); the full
+procedure is in the [target architecture](../architecture/target.md) §8. R0 implements
+the minimum:
+
+- A **ReleaseBundle** holds the candidate commit, the baseline commit, the verification
+  report and benchmark result digests, and the recovery target (the previous active
+  version). Its digest excludes its own approval.
+- The human sends a release decision for a `bundle_digest` through the CLI to the
+  supervisor's socket. Core never holds release rights.
+- The **Release Store** is a directory of immutable bundles plus an append-only journal and
+  `active`/`previous` pointers, outside the Operational Store and outside every worker
+  mount.
+- The supervisor is a deterministic state machine: `ready → activating → observing →
+  ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
+  and a deadline; after a restart it reads the journal and checks the real target first.
+- Steps: preflight (decision, digests, health) → quiesce (stop dispatch; the building job
+  has already ended) → activate (journal intent, swap the target, start) → observe
+  (readiness, one read and write cycle, dispatch loop health) → record the receipt.
+  On failure: recover to the previous version, or enter maintenance.
+- Activation is allowed only when verification showed **both** directions: the candidate
+  processes state written by the baseline, and the baseline processes state written by the
+  candidate. Breaking schema changes are not activated in R0.
+- Activatable targets in R0: the factory's own code and configuration. Unit files, polkit
+  rules, the supervisor, the gateway and other protected-set items change only through
+  operator maintenance.
+- The supervisor runs under its own principal and its own systemd unit, and keeps running
+  when core, workers or the gateway are down.
+
 ## 13. Identity and isolation
 
 These requirements apply from the first worker that can run arbitrary code.
@@ -393,6 +441,7 @@ These requirements apply from the first worker that can run arbitrary code.
 | `factory-worker` | Read its inputs; write its workspace; call the gateway | Read the DB, backups, `candidates.git`, credentials or other attempts' files; reach any network or IPC endpoint except the gateway |
 | `factory-publisher` | Read a stopped workspace; write the artifact store | Execute workspace content |
 | `factory-gateway` | Hold the provider key; call the allowed endpoint | Run inside a worker unit |
+| `factory-supervisor` | Read the Release Store; swap and start the core target; write the journal | Accept a release decision from anyone but an authenticated operator |
 
 Requirements:
 
@@ -473,6 +522,10 @@ and record the before and after versions with the reason.
 
 ## 16. Invariants
 
+During bootstrap, invariants may be merged, split, strengthened or checked differently.
+Weakening or removing one needs an ADR and a scenario showing it is unnecessary. After
+bootstrap they belong to the protected set ([ADR-0009](../adr/0009-self-hosting-first-ring.md)).
+
 | ID | Invariant | Enforcement and evidence |
 |---|---|---|
 | INV-01 | A job has at most one active attempt | `active_attempt_id` + unique constraint + transaction |
@@ -488,6 +541,7 @@ and record the before and after versions with the reason.
 | INV-11 | A workflow is not terminal while an execution or effect is unresolved | Aggregate predicate |
 | INV-12 | A worker writes only its own workspace and cannot write artifacts, evidence, state or other attempts' files | Unit sandbox + publisher checks |
 | INV-13 | Core can manage no systemd unit except `factory-worker@*.service`, and only start and stop it | polkit rule |
+| INV-14 | The supervisor activates only a bundle whose digest matches an authenticated human release decision, and records one outcome per release request | Release journal + digest check |
 
 ## 17. Data for later improvement
 
@@ -505,7 +559,7 @@ From R0 on, keep what self-improvement will need
 
 Each scenario needs an input or injected fault, the observed state and effect, and a
 stored receipt. Reducer scenarios should first run as property-based tests; boundary
-scenarios (T13–T17) need the real systemd and filesystem. R0 is complete only when all of
+scenarios (T13–T17, T25–T31) need the real systemd and filesystem. R0 is complete only when all of
 them pass.
 
 | # | Scenario | Required result |
@@ -534,6 +588,13 @@ them pass.
 | T22 | Compact packet approved | All three revisions are guarded; no approval is invented for a skipped gate |
 | T23 | Request not eligible for Compact | `blocked(unsupported_profile)`; nothing dispatched |
 | T24 | Gateway call with a revoked token or a disallowed model | Rejected; usage recorded only for accepted calls |
+| T25 | Candidate or bundle changed after the release decision | Digest mismatch; supervisor does not activate |
+| T26 | Candidate reads old state but the baseline cannot read the candidate's state | Not eligible for activation |
+| T27 | Core dies during its own activation | Supervisor finishes from its journal; the CLI still reaches the supervisor |
+| T28 | Supervisor crashes after swapping the target and before the receipt | Restart reconciles from the journal; no second activation |
+| T29 | Activated candidate fails observation; previous version is valid | Runtime recovered; workflow `failed` with `activation_failed_recovered` |
+| T30 | No valid recovery target, or recovery also fails | Maintenance; no loop; the operator sees the real status |
+| T31 | A candidate edits invariant tests, benchmark tasks, unit files or other protected-set items | Verification rejects it; the baseline checkers decide |
 
 ## 19. Defaults
 

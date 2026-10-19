@@ -22,8 +22,9 @@ Design stage. There is no code yet. The design is in [`docs/`](docs/):
 - **Humans** approve direction, plans and every change to the factory itself. The factory
   can improve itself, but it cannot change its own human gates.
 
-Ring 0 targets one Linux host with systemd: one local request, one human approval, one
-verified change candidate with evidence.
+Ring 0 is self-hosting: on one Linux host with systemd, the factory takes an item from
+its own improvement backlog, builds and verifies a change to itself, and after a human
+release decision activates it, recovering if activation fails.
 
 ## Develop
 

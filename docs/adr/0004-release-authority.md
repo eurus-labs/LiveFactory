@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-19
-- Applies from: Ring 2
+- Applies from: Ring 0 (changed by ADR-0009)
 
 ## Context
 

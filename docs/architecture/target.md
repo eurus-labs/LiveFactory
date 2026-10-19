@@ -78,14 +78,14 @@ evidence. Deterministic checks carry the most weight.
 
 | Ring | Capability | Adds | Explicitly deferred |
 |---|---|---|---|
-| 0 | One local request → one human gate → a verified candidate | Core, SQLite, CLI, three department roles, worker units, model gateway, publisher, artifact store, static config validation, manual backup and rollback | Everything below |
-| 1 | Replace or add a real provider without touching core lifecycle; improve department prompts, skills and tools; then workflow definitions | Conformance suite, descriptor versioning, provider pinning, benchmark harness, gate-floor check, Standard profile with two gates | Hot swap of running jobs, HA, a generic plugin platform |
-| 2 | Improve core code: proposal → isolated candidate → human release → activation and recovery with evidence | Factory Engineering workflow, Verification runner, Supervisor, Release Store, independent Console admin path | Automatic approval, self-modification of supervisor or identity, breaking schema migrations |
+| 0 | Self-hosting: a backlog item → one human gate → a verified candidate of LiveFactory → human release → activation with recovery | Core, SQLite, CLI, static Plumber, three department roles, worker units, model gateway, publisher, artifact store, minimal supervisor, Release Store, benchmark with a fixed task set, manual backup | Everything below |
+| 1 | User requests on other repositories; replace or add a real provider without touching core lifecycle; switch department versions at job boundaries | Workflow A, conformance suite, descriptor versioning, provider pinning, gate-floor check, Standard profile, hidden real-task benchmark | Hot swap of running jobs, HA, a generic plugin platform |
+| 2 | Harder changes: Escalated profile, isolated candidate store copies, richer recovery | Verification runner on store snapshots, independent Console admin path, schema migration procedure | Automatic approval, self-modification of supervisor or identity, automatic breaking migrations |
 | 3 | Scale where measurements show a bottleneck | Queues, storage, knowledge or infrastructure chosen from data; leases when execution leaves the host | A distributed design before the data asks for it |
 
-Department improvements come before core improvements because they are cheaper, more
-frequent and roll back by switching a pinned version at a job boundary. They do not need
-a supervisor.
+Ring 0 is self-hosting ([ADR-0009](../adr/0009-self-hosting-first-ring.md)): the factory's
+first customer is its own repository, so core, Plumber, the supervisor and the improvement
+loop all do real work from the start. Workflow A follows in Ring 1.
 
 ## 5. Human gates by risk
 
@@ -337,7 +337,7 @@ tokens used. Knowledge never overrides decision records, active wiring or releas
 ## 12. Open decisions
 
 - Implementation stack ([ADR-0007](../adr/0007-implementation-stack.md), proposed) and the
-  supervisor's language, decided in Ring 2.
+  supervisor's language, decided before the supervisor is built (build step 4).
 - First and second worker providers ([ADR-0008](../adr/0008-first-worker-provider.md),
   proposed).
 - Platform adapters for activation, publish and deploy, and provider-specific idempotency.

@@ -1,6 +1,6 @@
 # ADR-0005: Self-improvement covers three layers; gates and a protected set stay out
 
-- Status: Accepted
+- Status: Accepted; ring order superseded by ADR-0009
 - Date: 2026-10-19
 
 ## Context
