@@ -132,6 +132,10 @@ flowchart TD
 
 When Delivery gains publish or deploy actions, each one needs its own scope, permission
 and idempotency key, and its effects must be accounted for before the workflow ends.
+The key (`effect_key`) must stay the same across attempts that retry **the same action**;
+a per-attempt key does not stop a duplicate effect across two attempts. It helps only when
+the backend deduplicates on it and binds it to the operation's content; otherwise query
+the outcome or stop for the operator.
 
 ## 7. Workflow B — improving the factory
 
