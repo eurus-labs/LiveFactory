@@ -25,4 +25,4 @@ The commands to run before opening a pull request: lint, test, build.
 
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE). See also [`NOTICE`](NOTICE).

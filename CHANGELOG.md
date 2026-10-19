@@ -9,3 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- Add user-facing entries under Added, Changed, Deprecated, Removed, Fixed or Security.
      When you release, replace "Unreleased" with the date (YYYY-MM-DD). -->
+
+### Changed
+
+- License the project under the Apache License 2.0 instead of MIT.
