@@ -76,12 +76,33 @@ jobs:
 
           exit "$status"
 
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.11.32
+
+      - name: Install the project and its dev tools from the lockfile
+        run: uv sync --locked --python 3.12
+
+      - name: Type-check (pyright strict)
+        run: uv run pyright
+
+      - name: Test (pytest and Hypothesis)
+        run: uv run pytest
+
   # The one check a branch ruleset should require. Add every new job (build, test)
   # to needs; the check name stays the same. always(): a skipped required check
   # counts as passing, so this job must run and fail when anything above fails.
   verify:
     if: always()
-    needs: [conventional-commits]
+    needs: [conventional-commits, python]
     runs-on: ubuntu-latest
     steps:
       - name: Every required job passed or was skipped for a bot
