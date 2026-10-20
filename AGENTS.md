@@ -87,10 +87,12 @@ Use Problem → Design → Predict → Build → Validate → Learn.
 
 ## This Repository
 
-Replace this section when you create a repository from the template. Keep it short and factual.
-
-- What it is, its stack, and where the code lives: <fill in>.
-- Validate with: <the lint, test and build commands; CI runs the same>.
-- Default branch: `main` <or the branch work starts from, such as `dev`>.
-- Set the version with: <the project's tooling, if it has a version file>.
+- What it is: LiveFactory, a self-improving software factory. Design stage, no code yet.
+  `docs/spec/` is normative, `docs/architecture/` is informative, `docs/adr/` records
+  decisions; changing an accepted ADR needs a new ADR. Proposed stack: Python 3.12+
+  (ADR-0007, not yet accepted).
+- Validate with: no build or tests yet; CI runs only the `commits` workflow. Add each new
+  check to that workflow's `verify` job.
+- Default branch: `main`.
+- Set the version with: `CHANGELOG.md` and the release tag; there is no version file yet.
 - Verify `origin/main` and any file or command named here exist before relying on them; report gaps instead of inventing them.
