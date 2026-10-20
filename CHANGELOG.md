@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture decision records 0001–0009; Ring 0 is self-hosting: the factory
   improves its own repository first, and failures become top-priority backlog items.
 - Project description in the README and repository facts in AGENTS.md.
+- Core reducer: a pure state machine for jobs, attempts and workflows with human gates,
+  retry, handoff and stage limits, cancellation, reconciliation and release receipts,
+  covered by scenario tests and Hypothesis invariant tests.
+- CI type-checks with pyright (strict) and runs the tests.
 
 ### Changed
+
+- Accept ADR-0007 (Python stack) and ADR-0008 (Claude Code as the first provider).
 
 - License the project under the Apache License 2.0 instead of MIT.
