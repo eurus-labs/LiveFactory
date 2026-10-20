@@ -430,6 +430,29 @@ the minimum:
 - The supervisor runs under its own principal and its own systemd unit, and keeps running
   when core, workers or the gateway are down.
 
+## 12b. Incidents and the backlog
+
+Keeping the factory running is the top priority. Repair follows **recover first, fix
+second**: a working version fixes a broken one; a broken version never fixes itself.
+
+- Core, the supervisor and maintenance commands write an **incident record** for every
+  failure they detect: class, signature, versions, time and evidence refs. Writing it is
+  deterministic and needs no model. When the Operational Store is unavailable, the
+  record goes to a local spool and is imported on recovery.
+- Each open incident becomes a backlog item. Items with the same signature are merged
+  and their count increases; no duplicate items are created.
+- The next item is chosen by a fixed rule: open incidents first, ordered by class
+  (`activation_failed`, `data_integrity`, `crash_loop`, `limit_reached`, others), then
+  by count, then by age; then the remaining backlog in the operator's order.
+- An item that is waiting for a human or `blocked` does not hold the queue; the next item
+  is taken.
+- The operator can reorder or reject any item. The rule decides only what the factory
+  proposes next; every gate stays in place.
+
+**Break-glass.** When no version of the factory can run the improvement workflow (every
+version fails, or the store cannot be restored), the operator repairs it from outside
+with Claude Code, as during bootstrap, and records the incident and the fix afterwards.
+
 ## 13. Identity and isolation
 
 These requirements apply from the first worker that can run arbitrary code.
@@ -595,6 +618,8 @@ them pass.
 | T29 | Activated candidate fails observation; previous version is valid | Runtime recovered; workflow `failed` with `activation_failed_recovered` |
 | T30 | No valid recovery target, or recovery also fails | Maintenance; no loop; the operator sees the real status |
 | T31 | A candidate edits invariant tests, benchmark tasks, unit files or other protected-set items | Verification rejects it; the baseline checkers decide |
+| T32 | The same failure repeats 20 times, including while the store is down | One backlog item with count 20; spooled records imported once |
+| T33 | Incident items and normal items are open; the top incident is waiting for a human | The next incident is proposed, then normal items; nothing waits on the blocked one |
 
 ## 19. Defaults
 

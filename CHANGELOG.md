@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconciliation, workspace publishing, isolation and acceptance scenarios.
 - Target architecture for later rings, including self-improvement and release.
 - Architecture decision records 0001–0009; Ring 0 is self-hosting: the factory
-  improves its own repository first.
+  improves its own repository first, and failures become top-priority backlog items.
 - Project description in the README and repository facts in AGENTS.md.
 
 ### Changed
