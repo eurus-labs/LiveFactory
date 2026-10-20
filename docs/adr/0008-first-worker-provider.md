@@ -1,6 +1,6 @@
 # ADR-0008: Claude Code as the first worker provider
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 
 ## Context
@@ -10,7 +10,7 @@ goal is to add or replace a real provider without touching core lifecycle. Musub
 agent harness discussed earlier, is a candidate; its language and interface are not yet
 recorded.
 
-## Decision (proposed)
+## Decision
 
 - Use Claude Code, run headless as a subprocess by the worker host inside the worker unit,
   as the first provider.

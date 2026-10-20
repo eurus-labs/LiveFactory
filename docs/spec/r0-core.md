@@ -146,7 +146,7 @@ transaction. Only then does it acknowledge or dispatch.
 - When the outcome of a COMMIT is unknown, core looks up the receipt by idempotency key
   after reconnecting. It must not guess.
 - The reducer must be a pure function so that property-based tests can drive it
-  ([ADR-0007](../adr/0007-implementation-stack.md), proposed).
+  ([ADR-0007](../adr/0007-implementation-stack.md)).
 
 ## 6. State machines
 
@@ -648,7 +648,6 @@ These can be decided during implementation without weakening the contract:
 
 - Serialization format and package layout, keeping version and digest semantics.
 - The CLI's exact commands.
-- The first provider and its adapter ([ADR-0008](../adr/0008-first-worker-provider.md),
-  proposed).
+- The first provider's adapter details ([ADR-0008](../adr/0008-first-worker-provider.md)).
 - `User=` versus `DynamicUser=` for the worker unit once concurrency increases.
 - Measured timeouts, retention, RPO and RTO.
