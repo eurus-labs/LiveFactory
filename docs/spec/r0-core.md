@@ -31,7 +31,7 @@ The R0 profile is fixed:
   LiveFactory itself.
 - One core process, which is the only writer of the Operational Store (SQLite).
 - At most one worker attempt executing at a time.
-- One workflow definition: the Compact improvement workflow (§9).
+- One workflow definition: the Compact improvement workflow (section 9).
 - Worker effects are limited to the attempt's own workspace and calls through the model
   gateway. The only other effect is activation, performed by the supervisor after a human
   release decision. No push, publish or deploy.
@@ -85,7 +85,7 @@ flowchart TD
 | Publisher | Moving output into the artifact store after the worker stops ([ADR-0003](../adr/0003-workspace-output-publishing.md)) | Execute anything from the workspace |
 | Artifact store | `candidates.git` for code and a sha256 object store for everything else | Overwrite or delete an object in R0 |
 | Maintenance commands | Backup, restore, integrity checks, manual rollback | Replay the outbox after a restore |
-| Supervisor | Activation, observation and recovery of an approved release (§12a) | Review source, call a model, coordinate work |
+| Supervisor | Activation, observation and recovery of an approved release (section 12a) | Review source, call a model, coordinate work |
 | Release Store | A directory of immutable bundles plus an activation journal | Live inside the Operational Store |
 | Benchmark harness | Replaying the fixed task set against baseline and candidate | Be changed by the candidate it measures |
 
@@ -101,7 +101,7 @@ set. The CLI talks to the supervisor through its own socket, never through core.
    and an LLM review as a secondary signal. Its assignment and evidence namespace are
    separate from Implementation's.
 
-There is no Delivery department in R0; delivery is activation (§12a).
+There is no Delivery department in R0; delivery is activation (section 12a).
 
 ## 4. Records
 
@@ -110,7 +110,7 @@ the authenticated channel, never from a field the caller supplies.
 
 | Record | Minimum fields |
 |---|---|
-| WorkflowDefinition | `definition_id`, `revision`, stages, routes, `required_decisions`, error routes, limits (§7) |
+| WorkflowDefinition | `definition_id`, `revision`, stages, routes, `required_decisions`, error routes, limits (section 7) |
 | DepartmentDescriptor | `department_id`, `provider_version`, operation and schema versions, effect class, environment needs |
 | WorkflowInstance | `workflow_id`, `definition_revision`, status, `state_version`, `stop_intent`, `scheduling_paused`, counters, decision and artifact refs |
 | Job | `job_id`, `workflow_id`, `stage_id`, `occurrence`, target revisions, status, `active_attempt_id`, `technical_retries_used`, `handoffs_used`, `state_version` |
@@ -168,7 +168,7 @@ is inactive and its control group is empty.
 | running → pending | Known technical failure; unit stopped; effects safe to repeat; retries remain | Close the attempt; count one technical retry |
 | running → awaiting_decision | Worker handoff: the worker asked for input and the unit stopped | Close the attempt; keep checkpoint refs; count one handoff |
 | running/dispatched → blocked | Retry or handoff limit reached; unit stopped | Close the attempt; record the limit reason |
-| dispatched/running → outcome_unknown | Unit lost or timed out and the outcome cannot be derived | Stop the unit; block retries; start reconciliation (§11) |
+| dispatched/running → outcome_unknown | Unit lost or timed out and the outcome cannot be derived | Stop the unit; block retries; start reconciliation (section 11) |
 | pending → awaiting_decision | Stage is a gate | Create `gate_instance`; no attempt |
 | awaiting_decision → succeeded | Gate closed by a valid decision | Verdict selects the route: approved, revise or rejected |
 | awaiting_decision → pending | Input for a handoff arrived | Resume with a new attempt from the checkpoint; this does not count as a retry |
@@ -264,7 +264,7 @@ Rules:
   recorded on the instance. Opening a new workflow to bypass a limit is not allowed.
 - Changing a default for all workflows is a factory update.
 
-Token and cost usage is observed, not enforced (§14).
+Token and cost usage is observed, not enforced (section 14).
 
 ## 8. Delivery and idempotency
 
@@ -350,7 +350,7 @@ Decision: [ADR-0001](../adr/0001-local-execution-lifecycle.md).
 - Core stops an attempt when its stage `execution_timeout` expires. systemd's
   `RuntimeMaxSec` is the backstop if core itself hangs.
 - When core stops or crashes, systemd stops every bound worker unit. After restart, core
-  treats each attempt that was `dispatched` or `running` as lost and reconciles it (§11).
+  treats each attempt that was `dispatched` or `running` as lost and reconciles it (section 11).
   Core never reattaches to an old process.
 - A replacement attempt is never started before the previous unit is confirmed stopped.
 - Core uses the systemd watchdog. The notification must come from the main dispatch loop,
@@ -403,7 +403,7 @@ R0 performs no artifact garbage collection.
 ## 12a. Release and activation
 
 Release authority follows [ADR-0004](../adr/0004-release-authority.md); the full
-procedure is in the [target architecture](../architecture/target.md) §8. R0 implements
+procedure is in the [target architecture](../architecture/target.md) section 8. R0 implements
 the minimum:
 
 - A **ReleaseBundle** holds the candidate commit, the baseline commit, the verification
@@ -527,7 +527,7 @@ live disk. RPO 24 h and RTO 30 min are targets to measure by restore drill.
 - Each snapshot records the schema version, event cursor, artifact manifest with digests,
   and the time.
 - Maintenance runs `PRAGMA integrity_check`, `PRAGMA foreign_key_check`, the invariant
-  checks of §16, artifact reference checks, and a restore drill into a separate path.
+  checks of section 16, artifact reference checks, and a restore drill into a separate path.
 
 ### 15.4. Restore
 

@@ -31,7 +31,7 @@ unbuilt and untested until late, although self-improvement is the main goal.
   is unnecessary. After bootstrap, invariants and their checkers are in the protected set.
 - **Keeping the factory running comes first.** Detected failures become incident records,
   merged by signature, and open incidents go to the top of the backlog by a fixed rule
-  (spec §12b). A working version fixes a broken one; when no version can, the operator
+  (spec section 12b). A working version fixes a broken one; when no version can, the operator
   repairs from outside (break-glass).
 - The user-request workflow (Workflow A) moves to Ring 1. Structurally it is Workflow B
   without the release stage.
