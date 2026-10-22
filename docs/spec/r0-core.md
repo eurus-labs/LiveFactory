@@ -511,8 +511,11 @@ Decision: [ADR-0002](../adr/0002-model-credential-gateway.md).
 ### 15.1. Store
 
 SQLite with one writer. State, inbox, outbox, decisions, counters and attempt records
-share transactions. R0 has one storage failure domain and no high availability. The DB
-must not be placed on an unverified network filesystem.
+share transactions. The stored state is the source of truth and the event log is an audit
+trail; core never rebuilds its state by replaying history
+([ADR-0010](../adr/0010-stored-state-is-the-source-of-truth.md)). R0 has one storage
+failure domain and no high availability. The DB must not be placed on an unverified
+network filesystem.
 
 ### 15.2. When the store cannot be written
 
