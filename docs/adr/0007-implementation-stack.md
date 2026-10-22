@@ -1,6 +1,6 @@
 # ADR-0007: Python 3.12+ with strict typing and property-based tests
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 
 ## Context
@@ -10,7 +10,7 @@ is correctness of the state machine. Most core code will later be written by age
 through the improvement workflow, so the language must also maximize what machines can
 check. The owner works in Python.
 
-## Decision (proposed)
+## Decision
 
 - Core, CLI, worker host, gateway and publisher: Python 3.12 or later.
 - `pyright --strict` and Hypothesis stateful tests are required CI checks from the first

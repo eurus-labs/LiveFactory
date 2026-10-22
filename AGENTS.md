@@ -87,12 +87,13 @@ Use Problem → Design → Predict → Build → Validate → Learn.
 
 ## This Repository
 
-- What it is: LiveFactory, a self-improving software factory. Design stage, no code yet.
-  `docs/spec/` is normative, `docs/architecture/` is informative, `docs/adr/` records
-  decisions; changing an accepted ADR needs a new ADR. Proposed stack: Python 3.12+
-  (ADR-0007, not yet accepted).
-- Validate with: no build or tests yet; CI runs only the `commits` workflow. Add each new
-  check to that workflow's `verify` job.
+- What it is: LiveFactory, a self-improving software factory. Python 3.12+ managed with
+  uv (ADR-0007); code in `src/livefactory/`, tests in `tests/`. `docs/spec/` is
+  normative, `docs/architecture/` is informative, `docs/adr/` records decisions; changing
+  an accepted ADR needs a new ADR.
+- Validate with: `uv sync --locked`, `uv run pyright` (strict) and `uv run pytest`. CI runs
+  the same in the `python` job of the `commits` workflow; add each new check to that
+  workflow's `verify` job.
 - Default branch: `main`.
 - Set the version with: `CHANGELOG.md` and the release tag; there is no version file yet.
 - Verify `origin/main` and any file or command named here exist before relying on them; report gaps instead of inventing them.

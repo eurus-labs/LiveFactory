@@ -5,7 +5,8 @@ human control, and is designed to improve its own departments, workflows and cor
 
 ## Status
 
-Design stage. There is no code yet. The design is in [`docs/`](docs/):
+Build step 1 of Ring 0: the core reducer and its invariant tests. Nothing runs end to end
+yet. The design is in [`docs/`](docs/):
 
 - [Ring 0 core specification](docs/spec/r0-core.md): the normative contract for the first
   working version.
@@ -28,8 +29,15 @@ release decision activates it, recovering if activation fails.
 
 ## Develop
 
-Nothing to build or test yet. Contribution rules, commit conventions and validation
-steps are in [`AGENTS.md`](AGENTS.md).
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
+```sh
+uv sync --locked      # install the project and dev tools
+uv run pyright        # strict type check
+uv run pytest         # scenario tests and Hypothesis invariant tests
+```
+
+Contribution rules and commit conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## License
 

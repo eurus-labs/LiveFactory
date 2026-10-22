@@ -336,10 +336,10 @@ tokens used. Knowledge never overrides decision records, active wiring or releas
 
 ## 12. Open decisions
 
-- Implementation stack ([ADR-0007](../adr/0007-implementation-stack.md), proposed) and the
-  supervisor's language, decided before the supervisor is built (build step 4).
-- First and second worker providers ([ADR-0008](../adr/0008-first-worker-provider.md),
-  proposed).
+- The supervisor's language, decided before the supervisor is built (build step 4);
+  the rest of the stack is set by [ADR-0007](../adr/0007-implementation-stack.md).
+- The second worker provider and its interface; the first is set by
+  [ADR-0008](../adr/0008-first-worker-provider.md).
 - Platform adapters for activation, publish and deploy, and provider-specific idempotency.
 - When to add automatic knowledge indexing, storage replication or multiple core workers.
 
