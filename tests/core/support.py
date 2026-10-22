@@ -13,6 +13,8 @@ from livefactory.core.events import (
     Event,
     HumanDecision,
     Outbox,
+    ReleaseOutcome,
+    ReleaseReceipt,
     ResultKind,
     ResultPayload,
     SubmitWorkflow,
@@ -94,3 +96,13 @@ def run(events: Iterable[Event], state: FactoryState | None = None) -> tuple[Fac
 
 def outbox(transitions: Iterable[Transition]) -> list[Outbox]:
     return [message for transition in transitions for message in transition.outbox]
+
+
+def release_flow_states() -> list[FactoryState]:
+    """Every state on the way from submission to an activated release."""
+    events = [
+        *to_release(),
+        ReleaseReceipt("rel1", job("release"), BUNDLE, ReleaseOutcome.ACTIVATED, Actor.SUPERVISOR),
+    ]
+    _, transitions = run(events)
+    return [transition.state for transition in transitions]
