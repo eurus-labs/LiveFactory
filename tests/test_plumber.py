@@ -11,6 +11,7 @@ import pytest
 
 from livefactory.core.definition import (
     COMPACT_IMPROVEMENT,
+    RELEASE_ROUTES,
     Block,
     Finish,
     GoTo,
@@ -85,11 +86,26 @@ def test_worker_after_approval_must_require_it() -> None:
     assert "approval_not_required" in codes(with_stage("verify", requires_approval=False))
 
 
-def test_gate_and_release_must_route_every_outcome() -> None:
+def test_gate_must_route_every_verdict_and_reject_must_end() -> None:
     gate = routes("approve", {"approve": GoTo("implement"), "reject": Finish(WorkflowStatus.REJECTED)})
-    release = routes("release", {"activated": Finish(WorkflowStatus.SUCCEEDED)})
     assert "routes_incomplete" in codes(gate)
-    assert "routes_incomplete" in codes(release)
+    reject_loops = routes(
+        "approve", {"approve": GoTo("implement"), "revise": GoTo("plan"), "reject": GoTo("plan")}
+    )
+    assert "gate_reject_not_final" in codes(reject_loops)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"maintenance": Finish(WorkflowStatus.FAILED)},
+        {"rejected": Block("release_maintenance")},
+        {"failed_recovered": Finish(WorkflowStatus.SUCCEEDED)},
+        {"extra": Finish(WorkflowStatus.FAILED)},
+    ],
+)
+def test_release_routes_are_fixed(change: Mapping[str, Route]) -> None:
+    assert "release_routes_changed" in codes(routes("release", {**RELEASE_ROUTES, **change}))
 
 
 def test_unknown_target_and_bad_limits() -> None:
@@ -98,18 +114,8 @@ def test_unknown_target_and_bad_limits() -> None:
     assert "limit_invalid" in codes(with_stage("implement", max_technical_retries=-1))
 
 
-def test_block_only_on_release_with_a_release_reason() -> None:
+def test_block_only_on_release_stages() -> None:
     assert "block_misused" in codes(routes("implement", {"candidate_ready": Block("release_maintenance")}))
-    bad_reason = routes(
-        "release",
-        {
-            "activated": Finish(WorkflowStatus.SUCCEEDED),
-            "failed_recovered": Finish(WorkflowStatus.FAILED),
-            "rejected": Finish(WorkflowStatus.REJECTED),
-            "maintenance": Block("whatever"),
-        },
-    )
-    assert "block_misused" in codes(bad_reason)
 
 
 def test_finish_must_be_terminal_and_start_must_exist() -> None:

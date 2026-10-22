@@ -62,6 +62,16 @@ class WorkflowDefinition:
     stages: Mapping[str, Stage]
 
 
+# A release stage records what the supervisor did; its routes are fixed so a
+# definition cannot reinterpret an activation (Plumber checks equality).
+RELEASE_ROUTES: Mapping[str, Route] = {
+    "activated": Finish(WorkflowStatus.SUCCEEDED),
+    "failed_recovered": Finish(WorkflowStatus.FAILED),
+    "rejected": Finish(WorkflowStatus.REJECTED),
+    "maintenance": Block("release_maintenance"),
+}
+
+
 def _stages(*stages: Stage) -> Mapping[str, Stage]:
     return {stage.stage_id: stage for stage in stages}
 
@@ -106,16 +116,6 @@ COMPACT_IMPROVEMENT = WorkflowDefinition(
             },
             requires_approval=True,
         ),
-        Stage(
-            "release",
-            StageKind.RELEASE,
-            {
-                "activated": Finish(WorkflowStatus.SUCCEEDED),
-                "failed_recovered": Finish(WorkflowStatus.FAILED),
-                "rejected": Finish(WorkflowStatus.REJECTED),
-                "maintenance": Block("release_maintenance"),
-            },
-            max_executions=1,
-        ),
+        Stage("release", StageKind.RELEASE, dict(RELEASE_ROUTES), max_executions=1),
     ),
 )

@@ -18,9 +18,18 @@ from pathlib import Path
 from typing import Any
 
 from livefactory.core import codec
-from livefactory.core.definition import Block, Finish, GoTo, Route, Stage, StageKind, WorkflowDefinition
-from livefactory.core.events import ReleaseOutcome, Verdict
-from livefactory.core.model import RELEASE_WAIT_REASONS, WORKFLOW_TERMINAL, WorkflowStatus
+from livefactory.core.definition import (
+    RELEASE_ROUTES,
+    Block,
+    Finish,
+    GoTo,
+    Route,
+    Stage,
+    StageKind,
+    WorkflowDefinition,
+)
+from livefactory.core.events import Verdict
+from livefactory.core.model import WORKFLOW_TERMINAL, WorkflowStatus
 
 
 class Severity(Enum):
@@ -90,13 +99,14 @@ def _check_stage(stage: Stage, stages: Mapping[str, Stage]) -> list[Diagnostic]:
     if not stage.routes:
         error("no_routes", "a stage needs at least one route")
 
-    expected: set[str] | None = None
     if stage.kind is StageKind.GATE:
         expected = {verdict.value for verdict in Verdict}
-    elif stage.kind is StageKind.RELEASE:
-        expected = {outcome.value for outcome in ReleaseOutcome}
-    if expected is not None and set(stage.routes) != expected:
-        error("routes_incomplete", f"{stage.kind.value} stage must route exactly {sorted(expected)}")
+        if set(stage.routes) != expected:
+            error("routes_incomplete", f"gate stage must route exactly {sorted(expected)}")
+        elif stage.routes[Verdict.REJECT.value] != Finish(WorkflowStatus.REJECTED):
+            error("gate_reject_not_final", "a gate's reject route must finish as rejected")
+    if stage.kind is StageKind.RELEASE and dict(stage.routes) != dict(RELEASE_ROUTES):
+        error("release_routes_changed", "a release stage must use exactly RELEASE_ROUTES")
     if stage.kind is not StageKind.WORKER and stage.requires_approval:
         error("approval_on_non_worker", "only worker stages can require approval")
 
@@ -108,12 +118,9 @@ def _check_stage(stage: Stage, stages: Mapping[str, Stage]) -> list[Diagnostic]:
             case Finish(status=status):
                 if status not in WORKFLOW_TERMINAL:
                     error("finish_not_terminal", f"route {key!r} finishes with {status.value!r}")
-            case Block(reason=reason):
-                if stage.kind is not StageKind.RELEASE or reason not in RELEASE_WAIT_REASONS:
-                    error(
-                        "block_misused",
-                        f"route {key!r}: only release stages may block, with a release reason",
-                    )
+            case Block():
+                if stage.kind is not StageKind.RELEASE:
+                    error("block_misused", f"route {key!r}: only release stages may block")
     return found
 
 

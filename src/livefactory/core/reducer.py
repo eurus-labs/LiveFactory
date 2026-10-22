@@ -41,6 +41,7 @@ from livefactory.core.events import (
     Verdict,
     WorkflowEnded,
 )
+from livefactory.core.ids import is_ulid
 from livefactory.core.model import (
     ATTEMPT_ACTIVE,
     JOB_EXECUTING,
@@ -257,6 +258,8 @@ def _submit(tx: _Tx, event: SubmitWorkflow) -> _Handled:
 
 
 def _dispatch(tx: _Tx, event: DispatchJob) -> _Handled:
+    # The attempt ID names the worker unit, so only canonical ULIDs pass.
+    _require(is_ulid(event.attempt_id), "invalid_attempt_id")
     job = tx.job(event.job_id)
     workflow = tx.workflows[job.workflow_id]
     stage = tx.stage(job)
