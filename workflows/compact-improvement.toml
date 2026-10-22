@@ -1,0 +1,33 @@
+# The Ring 0 self-improvement workflow (spec section 9). It must load equal to
+# livefactory.core.definition.COMPACT_IMPROVEMENT; a test checks this.
+definition_id = "compact-improvement"
+revision = 1
+start = "plan"
+
+[[stages]]
+id = "plan"
+kind = "worker"
+routes = { packet_ready = "goto:approve", not_suitable = "finish:rejected" }
+
+[[stages]]
+id = "approve"
+kind = "gate"
+routes = { approve = "goto:implement", revise = "goto:plan", reject = "finish:rejected" }
+
+[[stages]]
+id = "implement"
+kind = "worker"
+requires_approval = true
+routes = { candidate_ready = "goto:verify" }
+
+[[stages]]
+id = "verify"
+kind = "worker"
+requires_approval = true
+routes = { pass = "goto:release", changes_required = "goto:implement", scope_change = "goto:plan" }
+
+[[stages]]
+id = "release"
+kind = "release"
+max_executions = 1
+routes = { activated = "finish:succeeded", failed_recovered = "finish:failed", rejected = "finish:rejected", maintenance = "block:release_maintenance" }
