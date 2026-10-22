@@ -120,6 +120,9 @@ class Workflow:
     ending_reason: str | None = None
     current_revisions: Revisions | None = None
     approved_revisions: Revisions | None = None
+    # Attempts whose final result was contradicted by a second, different
+    # result. Until a human resolves them the workflow cannot progress.
+    result_conflicts: tuple[str, ...] = ()
 
 
 class ReceiptOutcome(Enum):

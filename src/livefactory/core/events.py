@@ -134,6 +134,15 @@ class GrantAllowance:
 
 
 @dataclass(frozen=True)
+class ResolveConflict:
+    """A human keeps the accepted results and lets the workflow continue."""
+
+    command_id: str
+    workflow_id: str
+    actor: Actor
+
+
+@dataclass(frozen=True)
 class ReleaseReceipt:
     release_request_id: str
     job_id: str
@@ -153,6 +162,7 @@ type Event = (
     | AnswerHandoff
     | StopWorkflow
     | GrantAllowance
+    | ResolveConflict
     | ReleaseReceipt
 )
 

@@ -274,7 +274,7 @@ store, not exactly-once external effects.
 | Message | Idempotency key | Duplicate handling |
 |---|---|---|
 | Dispatch | `attempt_id` | The unit is named `factory-worker@<attempt_id>.service`. A privileged `ExecStartPre` claims the attempt by creating a run-once marker that the worker cannot write; if the marker exists the start fails, so a replay cannot run the attempt again even after the first run has ended. Core never resends a start blindly: on a lost reply it checks the unit state and the marker, and a claimed attempt goes to reconciliation |
-| Final result | `attempt_id` (unique); `result_digest` is compared with the accepted one | Same digest returns the old receipt; a different digest is a conflict that blocks the route and never overwrites |
+| Final result | `attempt_id` (unique); `result_digest` is compared with the accepted one | Same digest returns the old receipt. A different digest is a conflict: the accepted result stays, and the workflow is blocked (no dispatch, no gate decision, no success) until a human sends `ResolveConflict` |
 | Started | `attempt_id` | Ignored after the first |
 | Decision | `decision_id`, unique on (`gate_instance_id`, target revision digest) | Same ID returns the receipt; another ID for a closed gate returns `already_decided` |
 | Cancel, resume, extra allowance | `command_id` + operation digest | Replay returns the receipt; nothing applies twice |
@@ -300,7 +300,11 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
 - The operator config defines which requests are eligible for Compact. A request that
   needs the Standard or Escalated profile is `blocked(reason=unsupported_profile)` in R0.
 - Implementation is dispatched only when one decision covers all three current revisions
-  (INV-02).
+  (INV-02). A release opens, and a workflow succeeds, only while that approval still
+  covers the current revisions.
+- An approval-guarded stage must not change the revisions. A result that does fails the
+  workflow (`revisions_changed_after_approval`); a change of scope routes back to planning
+  and a new gate instead.
 - Each new revision opens a new `gate_instance`. A late approval for an old revision does
   not apply to the new one.
 - The packet must contain: the question, target revisions, choices, what changed since

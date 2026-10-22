@@ -31,6 +31,7 @@ from livefactory.core.events import (
     ReleaseReceipt,
     RequestReconcile,
     ResultKind,
+    ResolveConflict,
     ResultPayload,
     StartAttempt,
     StopAttempt,
@@ -90,6 +91,8 @@ def event_key(event: Event) -> str:
             return f"command:{command_id}"
         case GrantAllowance(command_id=command_id):
             return f"command:{command_id}"
+        case ResolveConflict(command_id=command_id):
+            return f"command:{command_id}"
         case DispatchJob(attempt_id=attempt_id):
             return f"dispatch:{attempt_id}"
         case AttemptStarted(attempt_id=attempt_id):
@@ -115,8 +118,13 @@ def apply(state: FactoryState, event: Event) -> Transition:
     if stored is not None:
         if stored.fingerprint == fingerprint:
             receipt = Receipt(key, ReceiptOutcome.DUPLICATE, stored.receipt.reason)
-        else:
-            receipt = Receipt(key, ReceiptOutcome.CONFLICT, "different content for an existing key")
+            return Transition(state, receipt, ())
+        receipt = Receipt(key, ReceiptOutcome.CONFLICT, "different content for an existing key")
+        if isinstance(event, AttemptFinished):
+            # A second, different final result blocks the route (spec section 8).
+            tx = _Tx(state)
+            if _record_conflict(tx, event.attempt_id):
+                return Transition(tx.freeze(), receipt, tuple(tx.outbox))
         return Transition(state, receipt, ())
 
     tx = _Tx(state)
@@ -125,7 +133,8 @@ def apply(state: FactoryState, event: Event) -> Transition:
     except _Rejected as rejected:
         return Transition(state, Receipt(key, ReceiptOutcome.REJECTED, rejected.reason), ())
     receipt = Receipt(key, outcome, reason)
-    return Transition(tx.freeze(key, StoredReceipt(fingerprint, receipt)), receipt, tuple(tx.outbox))
+    tx.receipts[key] = StoredReceipt(fingerprint, receipt)
+    return Transition(tx.freeze(), receipt, tuple(tx.outbox))
 
 
 def approval_covers_current(workflow: Workflow) -> bool:
@@ -146,6 +155,7 @@ def dispatchable_jobs(state: FactoryState) -> tuple[str, ...]:
         if (
             job.status is JobStatus.PENDING
             and workflow.ending is None
+            and not workflow.result_conflicts
             and stage.kind is StageKind.WORKER
             and (not stage.requires_approval or approval_covers_current(workflow))
         ):
@@ -185,8 +195,7 @@ class _Tx:
     def stage(self, job: Job) -> Stage:
         return self.workflows[job.workflow_id].definition.stages[job.stage_id]
 
-    def freeze(self, key: str, stored: StoredReceipt) -> FactoryState:
-        self.receipts[key] = stored
+    def freeze(self) -> FactoryState:
         return FactoryState(
             workflows=self.workflows,
             jobs=self.jobs,
@@ -222,6 +231,8 @@ def _handle(tx: _Tx, event: Event) -> _Handled:
             return _stop(tx, event)
         case GrantAllowance():
             return _grant(tx, event)
+        case ResolveConflict():
+            return _resolve(tx, event)
         case ReleaseReceipt():
             return _release(tx, event)
         case _:
@@ -252,6 +263,7 @@ def _dispatch(tx: _Tx, event: DispatchJob) -> _Handled:
     _require(event.attempt_id not in tx.attempts, "attempt_exists")
     _require(job.status is JobStatus.PENDING, "job_not_pending")
     _require(workflow.ending is None, "workflow_ending")
+    _require(not workflow.result_conflicts, "result_conflict")
     _require(stage.kind is StageKind.WORKER, "not_a_worker_stage")
     _require(not stage.requires_approval or approval_covers_current(workflow), "approval_missing")
     _require(
@@ -286,6 +298,9 @@ def _started(tx: _Tx, event: AttemptStarted) -> _Handled:
 
 def _finished(tx: _Tx, event: AttemptFinished) -> _Handled:
     attempt = tx.attempt(event.attempt_id)
+    if attempt.result_digest not in (None, event.payload.result_digest):
+        _record_conflict(tx, attempt.attempt_id)
+        return (ReceiptOutcome.CONFLICT, "result_digest_conflict")
     if attempt.status not in ATTEMPT_ACTIVE:
         tx.late_evidence.append(f"{attempt.attempt_id}:{event.payload.result_digest}")
         return (ReceiptOutcome.LATE, "attempt_not_active")
@@ -342,6 +357,7 @@ def _decision(tx: _Tx, event: HumanDecision) -> _Handled:
     job = tx.job(event.job_id)
     workflow = tx.workflows[job.workflow_id]
     _require(tx.stage(job).kind is StageKind.GATE, "not_a_gate")
+    _require(not workflow.result_conflicts, "result_conflict")
     _require(job.decision_id is None, "already_decided")
     _require(job.status is JobStatus.AWAITING_DECISION, "gate_not_open")
     _require(event.covers == workflow.current_revisions, "stale_revisions")
@@ -417,6 +433,31 @@ def _grant(tx: _Tx, event: GrantAllowance) -> _Handled:
     return _ACCEPTED
 
 
+def _resolve(tx: _Tx, event: ResolveConflict) -> _Handled:
+    _require(event.actor is Actor.HUMAN, "not_human")
+    workflow = tx.workflow(event.workflow_id)
+    _require(bool(workflow.result_conflicts), "no_conflict")
+    _require(workflow.status not in WORKFLOW_TERMINAL, "workflow_terminal")
+    tx.workflows[workflow.workflow_id] = replace(workflow, result_conflicts=())
+    _settle(tx, workflow.workflow_id)
+    return _ACCEPTED
+
+
+def _record_conflict(tx: _Tx, attempt_id: str) -> bool:
+    """Block the attempt's workflow on a contradicted result. False if nothing changed."""
+    attempt = tx.attempts.get(attempt_id)
+    if attempt is None:
+        return False
+    workflow = tx.workflows[tx.jobs[attempt.job_id].workflow_id]
+    if workflow.status in WORKFLOW_TERMINAL or attempt_id in workflow.result_conflicts:
+        return False
+    tx.workflows[workflow.workflow_id] = replace(
+        workflow, result_conflicts=(*workflow.result_conflicts, attempt_id)
+    )
+    _settle(tx, workflow.workflow_id)
+    return True
+
+
 def _release(tx: _Tx, event: ReleaseReceipt) -> _Handled:
     _require(event.actor is Actor.SUPERVISOR, "not_supervisor")
     job = tx.job(event.job_id)
@@ -468,6 +509,16 @@ def _close_with_result(tx: _Tx, attempt: Attempt, payload: ResultPayload) -> Non
         return
 
     match payload.kind:
+        case ResultKind.SUCCEEDED if (
+            stage.requires_approval
+            and payload.revisions is not None
+            and payload.revisions != workflow.current_revisions
+        ):
+            # Changing direction or plan needs a new approval: a guarded stage
+            # must route to planning (e.g. scope_change) instead.
+            reason = "revisions_changed_after_approval"
+            tx.jobs[job.job_id] = replace(job, status=JobStatus.FAILED, reason=reason)
+            _end(tx, job.workflow_id, WorkflowStatus.FAILED, reason)
         case ResultKind.SUCCEEDED:
             if payload.revisions is not None:
                 tx.workflows[workflow.workflow_id] = replace(
@@ -521,7 +572,10 @@ def _follow(tx: _Tx, job_id: str, route_key: str, bundle_digest: str | None) -> 
             tx.jobs[job_id] = replace(job, status=JobStatus.BLOCKED, reason=reason)
         case Finish(status=status):
             tx.jobs[job_id] = replace(job, status=JobStatus.SUCCEEDED, reason=route_key)
-            _end(tx, workflow.workflow_id, status, route_key)
+            if status is WorkflowStatus.SUCCEEDED and not approval_covers_current(workflow):
+                _end(tx, workflow.workflow_id, WorkflowStatus.FAILED, "approval_not_current")
+            else:
+                _end(tx, workflow.workflow_id, status, route_key)
         case GoTo(stage=target):
             tx.jobs[job_id] = replace(job, status=JobStatus.SUCCEEDED, reason=route_key)
             target_stage = workflow.definition.stages.get(target)
@@ -529,6 +583,10 @@ def _follow(tx: _Tx, job_id: str, route_key: str, bundle_digest: str | None) -> 
                 _end(tx, workflow.workflow_id, WorkflowStatus.FAILED, f"unknown_stage:{target}")
             elif target_stage.kind is StageKind.RELEASE and bundle_digest is None:
                 _end(tx, workflow.workflow_id, WorkflowStatus.FAILED, "missing_bundle")
+            elif (
+                target_stage.requires_approval or target_stage.kind is StageKind.RELEASE
+            ) and not approval_covers_current(workflow):
+                _end(tx, workflow.workflow_id, WorkflowStatus.FAILED, "approval_not_current")
             else:
                 release_bundle = bundle_digest if target_stage.kind is StageKind.RELEASE else None
                 _open_stage(tx, workflow.workflow_id, target, release_bundle)
@@ -604,7 +662,8 @@ def _settle(tx: _Tx, workflow_id: str) -> None:
         return
     if workflow.ending is None:
         jobs = [tx.jobs[job_id] for job_id in workflow.job_ids]
-        tx.workflows[workflow_id] = replace(workflow, status=_aggregate(jobs))
+        status = WorkflowStatus.BLOCKED if workflow.result_conflicts else _aggregate(jobs)
+        tx.workflows[workflow_id] = replace(workflow, status=status)
         return
 
     for job_id in workflow.job_ids:
@@ -624,6 +683,10 @@ def _settle(tx: _Tx, workflow_id: str) -> None:
 
     if any(_unresolved(tx.jobs[job_id]) for job_id in workflow.job_ids):
         tx.workflows[workflow_id] = replace(workflow, status=WorkflowStatus.CANCELLING)
+        return
+    if workflow.ending is WorkflowStatus.SUCCEEDED and workflow.result_conflicts:
+        # Success needs undisputed results (spec section 6.2).
+        tx.workflows[workflow_id] = replace(workflow, status=WorkflowStatus.BLOCKED)
         return
     tx.workflows[workflow_id] = replace(workflow, status=workflow.ending)
     tx.outbox.append(WorkflowEnded(workflow_id, workflow.ending, workflow.ending_reason))

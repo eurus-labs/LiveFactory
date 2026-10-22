@@ -18,6 +18,7 @@ from livefactory.core.events import (
     ReleaseOutcome,
     ReleaseReceipt,
     RequestReconcile,
+    ResolveConflict,
     ResultKind,
     StartAttempt,
     StopAttempt,
@@ -121,7 +122,10 @@ def test_t04_result_resent_same_or_different_digest() -> None:
 
     assert same.receipt.outcome is ReceiptOutcome.DUPLICATE
     assert different.receipt.outcome is ReceiptOutcome.CONFLICT
-    assert different.state == first.state
+    # The accepted result stays; the conflict blocks the workflow (spec section 8).
+    assert different.state.jobs == first.state.jobs
+    assert different.state.attempts == first.state.attempts
+    assert different.state.workflows[WF].result_conflicts == ("a1",)
     assert first.state.attempts["a1"].result_digest == "r1"
 
 
@@ -366,3 +370,57 @@ def test_undeclared_outcome_fails_the_workflow() -> None:
         WorkflowStatus.FAILED,
         "undeclared_outcome:surprise",
     )
+
+
+def test_conflicting_result_blocks_progress_until_resolved() -> None:
+    state, _ = run(to_implement())
+    contradicted = apply(state, finish("a-plan", result(ResultKind.SUCCEEDED, "not_suitable", "r-other")))
+
+    assert contradicted.receipt.outcome is ReceiptOutcome.CONFLICT
+    assert contradicted.state.jobs == state.jobs
+    assert contradicted.state.workflows[WF].status is WorkflowStatus.BLOCKED
+    assert dispatchable_jobs(contradicted.state) == ()
+    assert apply(contradicted.state, DispatchJob(job("implement"), "ai")).receipt.reason == (
+        "result_conflict"
+    )
+    again = apply(contradicted.state, finish("a-plan", result(ResultKind.SUCCEEDED, "x", "r-third")))
+    assert again.state == contradicted.state
+
+    worker = apply(contradicted.state, ResolveConflict("c-res", WF, Actor.WORKER))
+    assert worker.receipt.reason == "not_human"
+    resolved = apply(contradicted.state, ResolveConflict("c-res", WF, Actor.HUMAN)).state
+    assert resolved.workflows[WF].status is WorkflowStatus.RUNNING
+    assert dispatchable_jobs(resolved) == (job("implement"),)
+
+
+def test_conflict_after_release_prevents_success() -> None:
+    state, _ = run(to_release())
+    contradicted = apply(
+        state, finish("a-ver", result(ResultKind.SUCCEEDED, "changes_required", "r-other"))
+    ).state
+    activated = apply(contradicted, release(ReleaseOutcome.ACTIVATED)).state
+
+    assert activated.jobs[job("release")].status is JobStatus.SUCCEEDED
+    assert activated.workflows[WF].status is WorkflowStatus.BLOCKED
+    done = apply(activated, ResolveConflict("c-res", WF, Actor.HUMAN)).state
+    assert done.workflows[WF].status is WorkflowStatus.SUCCEEDED
+
+
+def test_guarded_stage_cannot_change_revisions_without_approval() -> None:
+    sneaky = Revisions("compact@1", "dir@1", "plan@sneaky")
+    state, transitions = run(
+        [
+            *to_implement(),
+            *run_attempt(job("implement"), "ai", result(ResultKind.SUCCEEDED, "candidate_ready", "r")),
+            *run_attempt(
+                job("verify"), "av", result(ResultKind.SUCCEEDED, "pass", "r", sneaky, BUNDLE)
+            ),
+        ]
+    )
+    workflow = state.workflows[WF]
+    assert (workflow.status, workflow.ending_reason) == (
+        WorkflowStatus.FAILED,
+        "revisions_changed_after_approval",
+    )
+    assert job("release") not in state.jobs
+    assert not any(isinstance(m, AwaitRelease) for m in outbox(transitions))

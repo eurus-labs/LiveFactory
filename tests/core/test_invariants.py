@@ -32,6 +32,7 @@ from livefactory.core.events import (
     Actor,
     AnswerHandoff,
     AttemptFinished,
+    AwaitRelease,
     AttemptLost,
     AttemptStarted,
     DispatchJob,
@@ -43,6 +44,7 @@ from livefactory.core.events import (
     ReleaseOutcome,
     ReleaseReceipt,
     ResultKind,
+    ResolveConflict,
     ResultPayload,
     StartAttempt,
     StopIntent,
@@ -62,6 +64,7 @@ from livefactory.core.model import (
     JobStatus,
     ReceiptOutcome,
     Revisions,
+    WorkflowStatus,
     empty_state,
 )
 from livefactory.core.reducer import Transition, apply, approval_covers_current, dispatchable_jobs
@@ -114,7 +117,7 @@ class CoreMachine(RuleBasedStateMachine):
 
     # -- chaos: any event, valid or not, aimed at existing IDs ---------------
 
-    @rule(data=st.data(), choice=st.integers(0, 10), actor=ACTORS)
+    @rule(data=st.data(), choice=st.integers(0, 11), actor=ACTORS)
     def chaos(self, data: st.DataObject, choice: int, actor: Actor) -> None:
         job_id = data.draw(st.sampled_from(self.job_ids()))
         attempt_id = data.draw(st.sampled_from(self.attempt_ids()))
@@ -152,6 +155,7 @@ class CoreMachine(RuleBasedStateMachine):
                 data.draw(st.sampled_from(list(ReleaseOutcome))),
                 actor,
             ),
+            ResolveConflict(self.fresh("c"), workflow_id, actor),
         ]
         self.step(events[choice])
 
@@ -173,8 +177,9 @@ class CoreMachine(RuleBasedStateMachine):
         elif active := self.live_attempts(*ATTEMPT_ACTIVE):
             job = self.state.jobs[self.state.attempts[active[0]].job_id]
             stage = self.state.workflows[job.workflow_id].definition.stages[job.stage_id]
+            revisions = None if stage.requires_approval else REVISIONS[0]
             payload = ResultPayload(
-                ResultKind.SUCCEEDED, next(iter(stage.routes)), self.fresh("r"), REVISIONS[0], BUNDLES[0]
+                ResultKind.SUCCEEDED, next(iter(stage.routes)), self.fresh("r"), revisions, BUNDLES[0]
             )
             self.step(AttemptFinished(active[0], payload))
         elif gates := self.jobs_where(JobStatus.AWAITING_DECISION, StageKind.GATE):
@@ -189,6 +194,12 @@ class CoreMachine(RuleBasedStateMachine):
                     self.fresh("rel"), releases[0], bundle, ReleaseOutcome.ACTIVATED, Actor.SUPERVISOR
                 )
             )
+
+    @precondition(lambda self: any(w.result_conflicts for w in self.state.workflows.values()))
+    @rule()
+    def resolve(self) -> None:
+        workflow = next(w for w in self.state.workflows.values() if w.result_conflicts)
+        self.step(ResolveConflict(self.fresh("c"), workflow.workflow_id, Actor.HUMAN))
 
     @precondition(lambda self: len(self.state.workflows) < len(WORKFLOWS))
     @rule()
@@ -300,21 +311,38 @@ class CoreMachine(RuleBasedStateMachine):
         after = transition.state
         outcome = transition.receipt.outcome
 
-        if outcome in (ReceiptOutcome.REJECTED, ReceiptOutcome.DUPLICATE, ReceiptOutcome.CONFLICT):
+        if outcome in (ReceiptOutcome.REJECTED, ReceiptOutcome.DUPLICATE):
             assert after == before, "a rejected or repeated event changed the state"
             assert transition.outbox == ()
+        if outcome is ReceiptOutcome.CONFLICT:
+            # Only a contradicted final result records anything: the conflict itself.
+            if isinstance(event, AttemptFinished):
+                assert after.jobs == before.jobs and after.attempts == before.attempts
+                attempt = before.attempts.get(event.attempt_id)
+                if attempt is not None:
+                    workflow_id = before.jobs[attempt.job_id].workflow_id
+                    if before.workflows[workflow_id].status not in WORKFLOW_TERMINAL:
+                        assert event.attempt_id in after.workflows[workflow_id].result_conflicts
+            else:
+                assert after == before
+            assert transition.outbox == ()
 
-        # Applying the same event again is answered from its receipt.
-        if outcome in (ReceiptOutcome.ACCEPTED, ReceiptOutcome.LATE):
-            again = apply(after, event)
+        # Applying the same event again changes nothing more.
+        key = transition.receipt.key
+        again = apply(after, event)
+        assert again.state == after and again.outbox == ()
+        if key in after.receipts and key not in before.receipts:
             assert again.receipt.outcome is ReceiptOutcome.DUPLICATE
-            assert again.state == after and again.outbox == ()
 
         # INV-03: humans decide; workers and supervisors cannot.
         if isinstance(event, HumanDecision) and event.actor is not Actor.HUMAN:
             assert outcome is not ReceiptOutcome.ACCEPTED
 
         for message in transition.outbox:
+            if isinstance(message, AwaitRelease):
+                # A release opens only under an approval of the current revisions.
+                job = after.jobs[message.job_id]
+                assert approval_covers_current(after.workflows[job.workflow_id])
             if isinstance(message, StartAttempt):
                 # INV-02: approval-guarded stages start only under a current approval.
                 job = before.jobs[message.job_id]
@@ -323,6 +351,8 @@ class CoreMachine(RuleBasedStateMachine):
                     assert approval_covers_current(workflow)
                 # INV-08: an unresolved job never gets a new attempt.
                 assert job.status is JobStatus.PENDING
+                # A contradicted result blocks new work until a human resolves it.
+                assert not workflow.result_conflicts
 
         for job_id, old in before.jobs.items():
             new = after.jobs[job_id]
@@ -354,6 +384,13 @@ class CoreMachine(RuleBasedStateMachine):
                 assert new_workflow == old_workflow
             if old_workflow.ending is not None:
                 assert new_workflow.ending == old_workflow.ending
+            if (
+                new_workflow.status is WorkflowStatus.SUCCEEDED
+                and old_workflow.status is not WorkflowStatus.SUCCEEDED
+            ):
+                # Completion predicate: current approval, undisputed results.
+                assert approval_covers_current(new_workflow)
+                assert not new_workflow.result_conflicts
             for stage_id, count in old_workflow.stage_executions.items():
                 assert new_workflow.stage_executions[stage_id] >= count
 

@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   improves its own repository first, and failures become top-priority backlog items.
 - Project description in the README and repository facts in AGENTS.md.
 - Core reducer: a pure state machine for jobs, attempts and workflows with human gates,
-  retry, handoff and stage limits, cancellation, reconciliation and release receipts,
+  retry, handoff and stage limits, cancellation, reconciliation, release receipts and
+  blocking on conflicting results,
   covered by scenario tests and Hypothesis invariant tests.
 - CI type-checks with pyright (strict) and runs the tests.
 
