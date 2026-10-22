@@ -5,8 +5,9 @@ human control, and is designed to improve its own departments, workflows and cor
 
 ## Status
 
-Build step 1 of Ring 0: the core reducer and its invariant tests. Nothing runs end to end
-yet. The design is in [`docs/`](docs/):
+Build step 2 of Ring 0: the core runs the self-improvement workflow end to end on a local
+SQLite store, with a fake worker and a simulated supervisor. Isolation, real workers and
+the supervisor come next. The design is in [`docs/`](docs/):
 
 - [Ring 0 core specification](docs/spec/r0-core.md): the normative contract for the first
   working version.
@@ -36,6 +37,22 @@ uv sync --locked      # install the project and dev tools
 uv run pyright        # strict type check
 uv run pytest         # scenario tests and Hypothesis invariant tests
 ```
+
+Try the workflow with the step-2 harness:
+
+```sh
+export LIVEFACTORY_DB=/tmp/livefactory/core.db
+uv run livefactory init --dev       # dev mode allows the simulated worker and supervisor
+uv run livefactory submit wf1
+uv run livefactory dev run          # the fake worker plans; the workflow waits for you
+uv run livefactory status           # shows the exact decide command and --covers value
+uv run livefactory decide wf1/approve/1 approve --covers compact@1,direction@1,plan@1
+uv run livefactory dev run          # implement and verify; waits for the supervisor
+uv run livefactory dev release wf1/release/1 activated
+```
+
+Every command that changes state prints its `--id`. If a command exits 3 (store
+unavailable), rerun it with the same `--id`; nothing is applied twice.
 
 Contribution rules and commit conventions are in [`AGENTS.md`](AGENTS.md).
 

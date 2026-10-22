@@ -7,6 +7,9 @@ license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+livefactory = "livefactory.cli:entry"
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",
