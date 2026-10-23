@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plumber checks for workflow definitions, including the human-gate floor; unknown keys
   in a definition file are refused.
 - Step-2 dev harness: a fake worker and a simulated supervisor for dev-mode stores.
+- `docs/worth-knowing.md`: per-release notes on decisions, guarantees and sharp edges.
 
 ### Changed
 
