@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from livefactory.core import codec
 from livefactory.core.definition import (
@@ -124,10 +124,15 @@ def _check_stage(stage: Stage, stages: Mapping[str, Stage]) -> list[Diagnostic]:
     return found
 
 
+def _is_approval(stage: Stage, key: str) -> bool:
+    """Taking this route records a human approval."""
+    return stage.kind is StageKind.GATE and key == Verdict.APPROVE.value
+
+
 def _edges(stage: Stage, skip_approve: bool) -> list[str]:
     targets: list[str] = []
     for key, route in stage.routes.items():
-        if skip_approve and stage.kind is StageKind.GATE and key == Verdict.APPROVE.value:
+        if skip_approve and _is_approval(stage, key):
             continue
         if isinstance(route, GoTo):
             targets.append(route.stage)
@@ -163,6 +168,8 @@ def _check_gate_floor(definition: WorkflowDefinition) -> list[Diagnostic]:
                 )
             )
         for key, route in stage.routes.items():
+            if _is_approval(stage, key):
+                continue
             if isinstance(route, Finish) and route.status is WorkflowStatus.SUCCEEDED:
                 found.append(
                     Diagnostic(
@@ -190,21 +197,28 @@ def _check_gate_floor(definition: WorkflowDefinition) -> list[Diagnostic]:
 
 _KINDS = {kind.value: kind for kind in StageKind}
 _TERMINALS = {status.value: status for status in WORKFLOW_TERMINAL}
+_TOP_KEYS = frozenset({"definition_id", "revision", "start", "stages"})
+_STAGE_KEYS = frozenset(
+    {"id", "kind", "routes", "max_technical_retries", "max_handoffs", "max_executions", "requires_approval"}
+)
 
 
 def load_definition(path: Path) -> WorkflowDefinition:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise DefinitionError(f"{path}: {exc}") from exc
     return parse_definition(data)
 
 
 def parse_definition(data: Mapping[str, Any]) -> WorkflowDefinition:
+    _known_keys(data, _TOP_KEYS, "definition")
     try:
         stages: dict[str, Stage] = {}
         for raw in data["stages"]:
-            stage = _parse_stage(raw)
+            if not isinstance(raw, Mapping):
+                raise DefinitionError(f"each stage must be a table, got {raw!r}")
+            stage = _parse_stage(cast(Mapping[str, Any], raw))
             if stage.stage_id in stages:
                 raise DefinitionError(f"duplicate stage {stage.stage_id!r}")
             stages[stage.stage_id] = stage
@@ -219,10 +233,17 @@ def parse_definition(data: Mapping[str, Any]) -> WorkflowDefinition:
 
 
 def _parse_stage(raw: Mapping[str, Any]) -> Stage:
+    _known_keys(raw, _STAGE_KEYS, f"stage {raw.get('id')!r}")
     kind = _KINDS.get(_text(raw["kind"]))
     if kind is None:
         raise DefinitionError(f"unknown stage kind {raw['kind']!r}")
-    routes = {_text(key): _parse_route(_text(value)) for key, value in raw["routes"].items()}
+    raw_routes = raw["routes"]
+    if not isinstance(raw_routes, Mapping):
+        raise DefinitionError(f"stage routes must be a table, got {raw_routes!r}")
+    routes = {
+        _text(key): _parse_route(_text(value))
+        for key, value in cast(Mapping[object, object], raw_routes).items()
+    }
     return Stage(
         stage_id=_text(raw["id"]),
         kind=kind,
@@ -230,7 +251,7 @@ def _parse_stage(raw: Mapping[str, Any]) -> Stage:
         max_technical_retries=_number(raw.get("max_technical_retries", 2)),
         max_handoffs=_number(raw.get("max_handoffs", 3)),
         max_executions=_number(raw.get("max_executions", 3)),
-        requires_approval=bool(raw.get("requires_approval", False)),
+        requires_approval=_flag(raw.get("requires_approval", False)),
     )
 
 
@@ -255,6 +276,18 @@ def _parse_route(text: str) -> Route:
 def _text(value: object) -> str:
     if not isinstance(value, str):
         raise DefinitionError(f"expected a string, got {value!r}")
+    return value
+
+
+def _known_keys(table: Mapping[str, Any], allowed: frozenset[str], where: str) -> None:
+    extra = set(table) - allowed
+    if extra:
+        raise DefinitionError(f"{where}: unknown keys {sorted(extra)}")
+
+
+def _flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise DefinitionError(f"expected true or false, got {value!r}")
     return value
 
 

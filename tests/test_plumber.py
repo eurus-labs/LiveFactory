@@ -82,6 +82,27 @@ def test_success_without_approval_is_rejected() -> None:
     assert "success_without_approval" in codes(shortcut)
 
 
+def test_a_gate_may_finish_successfully_on_approve() -> None:
+    review_only = routes(
+        "approve",
+        {
+            "approve": Finish(WorkflowStatus.SUCCEEDED),
+            "revise": GoTo("plan"),
+            "reject": Finish(WorkflowStatus.REJECTED),
+        },
+    )
+    assert "success_without_approval" not in codes(review_only)
+    shortcut = routes(
+        "approve",
+        {
+            "approve": GoTo("implement"),
+            "revise": Finish(WorkflowStatus.SUCCEEDED),
+            "reject": Finish(WorkflowStatus.REJECTED),
+        },
+    )
+    assert "success_without_approval" in codes(shortcut)
+
+
 def test_worker_after_approval_must_require_it() -> None:
     assert "approval_not_required" in codes(with_stage("verify", requires_approval=False))
 
@@ -147,6 +168,21 @@ MALFORMED: list[Mapping[str, Any]] = [
             {"id": "a", "kind": "worker", "routes": {"k": "finish:failed"}},
         ],
     },
+    {"definition_id": "x", "revision": 1, "start": "a", "stages": [{"id": "a", "kind": "worker", "routes": "goto:a"}]},
+    {"definition_id": "x", "revision": 1, "start": "a", "stages": ["a"]},
+    {"definition_id": "x", "revision": 1, "start": "a", "stages": [], "extra": 1},
+    {
+        "definition_id": "x",
+        "revision": 1,
+        "start": "a",
+        "stages": [{"id": "a", "kind": "worker", "routes": {"k": "finish:failed"}, "max_execution": 1}],
+    },
+    {
+        "definition_id": "x",
+        "revision": 1,
+        "start": "a",
+        "stages": [{"id": "a", "kind": "worker", "routes": {"k": "finish:failed"}, "requires_approval": "false"}],
+    },
 ]
 
 
@@ -154,3 +190,10 @@ MALFORMED: list[Mapping[str, Any]] = [
 def test_malformed_files_are_refused(data: Mapping[str, object]) -> None:
     with pytest.raises(DefinitionError):
         parse_definition(data)
+
+
+def test_a_file_that_is_not_utf8_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "latin1.toml"
+    path.write_bytes(b'definition_id = "caf\xe9"\n')
+    with pytest.raises(DefinitionError):
+        load_definition(path)
