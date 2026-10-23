@@ -31,7 +31,7 @@ from livefactory.core.events import (
     Verdict,
     WorkflowEnded,
 )
-from livefactory.core.model import JobStatus, ReceiptOutcome, Revisions, WorkflowStatus
+from livefactory.core.model import AttemptStatus, JobStatus, ReceiptOutcome, Revisions, WorkflowStatus
 from livefactory.core.reducer import apply, dispatchable_jobs
 
 from tests.core.support import (
@@ -443,3 +443,38 @@ def test_state_checks_flag_damage() -> None:
     plan = state.jobs[job("plan")]
     broken = replace(state, jobs={**state.jobs, plan.job_id: replace(plan, active_attempt_id=None)})
     assert any("active attempt" in problem for problem in state_violations(broken))
+
+
+def test_state_checks_flag_unresolved_attempts_outside_their_job() -> None:
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    plan, attempt = state.jobs[job("plan")], state.attempts[aid("a1")]
+    orphaned = replace(
+        state,
+        jobs={**state.jobs, plan.job_id: replace(plan, status=JobStatus.PENDING, active_attempt_id=None)},
+        attempts={aid("a1"): replace(attempt, status=AttemptStatus.OUTCOME_UNKNOWN)},
+    )
+    assert any("not its job's active attempt" in p for p in state_violations(orphaned))
+    mismatched = replace(state, attempts={aid("a1"): replace(attempt, status=AttemptStatus.SUCCEEDED)})
+    assert any("does not match" in p for p in state_violations(mismatched))
+
+
+def test_state_checks_flag_counters_below_their_records() -> None:
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    workflow, plan = state.workflows[WF], state.jobs[job("plan")]
+    uncounted = replace(state, workflows={WF: replace(workflow, stage_executions={})})
+    assert any("fewer executions" in p for p in state_violations(uncounted))
+    unstarted = replace(state, jobs={**state.jobs, plan.job_id: replace(plan, attempts_started=0)})
+    assert any("attempt_no outside" in p for p in state_violations(unstarted))
+
+
+def test_state_checks_accept_a_job_stopped_at_its_stage_limit() -> None:
+    changes = result(ResultKind.SUCCEEDED, "changes_required", "r-ch")
+    candidate = result(ResultKind.SUCCEEDED, "candidate_ready", "r-c")
+    events = [*to_implement()]
+    for n in range(1, 4):
+        events += run_attempt(job("implement", n), aid(f"ai{n}"), candidate)
+        events += run_attempt(job("verify", n), aid(f"av{n}"), changes)
+    events.append(StopWorkflow("c-stop", WF, StopIntent.CANCEL, Actor.HUMAN))
+    state, _ = run(events)
+    assert state.jobs[job("implement", 4)].status is JobStatus.CANCELLED
+    assert state_violations(state) == []

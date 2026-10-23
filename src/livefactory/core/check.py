@@ -12,6 +12,7 @@ from livefactory.core.model import (
     JOB_EXECUTING,
     RELEASE_WAIT_REASONS,
     WORKFLOW_TERMINAL,
+    AttemptStatus,
     FactoryState,
     JobStatus,
 )
@@ -45,6 +46,17 @@ def state_violations(state: FactoryState) -> list[str]:
                     or (job.status is JobStatus.BLOCKED and job.reason in RELEASE_WAIT_REASONS)
                 ):
                     found.append(f"workflow {workflow_id}: terminal with unresolved job {job_id}")
+        # Counters only grow, so they are at least what the records show. A
+        # job stopped while blocked may never have been admitted: skip it.
+        admitted: dict[str, int] = {}
+        for job_id in workflow.job_ids:
+            job = state.jobs.get(job_id)
+            if job is None or job.reason in ("stage_limit", "stopped"):
+                continue
+            admitted[job.stage_id] = admitted.get(job.stage_id, 0) + 1
+        for stage_id, count in admitted.items():
+            if workflow.stage_executions.get(stage_id, 0) < count:
+                found.append(f"workflow {workflow_id}: stage {stage_id} counts fewer executions than jobs")
 
     for job_id, job in state.jobs.items():
         workflow = state.workflows.get(job.workflow_id)
@@ -66,12 +78,27 @@ def state_violations(state: FactoryState) -> list[str]:
             attempt = state.attempts.get(job.active_attempt_id)
             if attempt is None or attempt.job_id != job_id:
                 found.append(f"job {job_id}: active attempt missing or foreign")
+            elif (attempt.status in ATTEMPT_ACTIVE) != (job.status in JOB_EXECUTING) or (
+                attempt.status is AttemptStatus.OUTCOME_UNKNOWN
+            ) != (job.status is JobStatus.OUTCOME_UNKNOWN):
+                found.append(f"job {job_id}: active attempt status {attempt.status.value} does not match")
 
     active = [a.attempt_id for a in state.attempts.values() if a.status in ATTEMPT_ACTIVE]
     if len(active) > 1:
         found.append(f"more than one executing attempt: {sorted(active)}")
+    numbers: set[tuple[str, int]] = set()
     for attempt_id, attempt in state.attempts.items():
-        if attempt.attempt_id != attempt_id or attempt.job_id not in state.jobs:
+        job = state.jobs.get(attempt.job_id)
+        if attempt.attempt_id != attempt_id or job is None:
             found.append(f"attempt {attempt_id}: not owned by a known job")
+            continue
+        unresolved = attempt.status in ATTEMPT_ACTIVE or attempt.status is AttemptStatus.OUTCOME_UNKNOWN
+        if unresolved and job.active_attempt_id != attempt_id:
+            found.append(f"attempt {attempt_id}: unresolved but not its job's active attempt")
+        if not 1 <= attempt.attempt_no <= job.attempts_started:
+            found.append(f"attempt {attempt_id}: attempt_no outside its job's attempts_started")
+        if (attempt.job_id, attempt.attempt_no) in numbers:
+            found.append(f"attempt {attempt_id}: attempt_no repeats")
+        numbers.add((attempt.job_id, attempt.attempt_no))
 
     return found
