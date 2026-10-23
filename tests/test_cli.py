@@ -6,14 +6,16 @@ import io
 import re
 import sqlite3
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
 from livefactory.cli import main
 from livefactory.core.model import WorkflowStatus
-from livefactory.store import Store
+from livefactory.store import Store, StoreUnavailable
 
 from tests.core.support import aid
+from tests.test_store import FailAt
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -66,11 +68,33 @@ def test_rerun_with_the_same_id_is_safe(cli: Cli) -> None:
     assert cli("submit", "wf1", "--id", "not-a-ulid")[0] == 2
 
 
-def test_the_key_is_printed_before_the_write(cli: Cli) -> None:
+def test_the_key_is_printed_before_the_write(cli: Cli, monkeypatch: pytest.MonkeyPatch) -> None:
     key = aid("cancel-1")
     cli("submit", "wf1")
-    _, _, err = cli("cancel", "wf1", "--id", key)
-    assert f"id: {key}" in err
+
+    def fail(*_: object, **__: object) -> NoReturn:
+        raise StoreUnavailable("write failed, outcome may be unknown")
+
+    monkeypatch.setattr(Store, "submit", fail)
+    code, out, err = cli("cancel", "wf1", "--id", key)
+    assert (code, out) == (3, "") and f"id: {key}" in err
+
+
+@pytest.mark.parametrize(("point", "rerun"), [("after_commit", "duplicate\n"), ("before_commit", "accepted\n")])
+def test_unknown_write_outcome_exits_3_and_a_rerun_settles_it(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, point: str, rerun: str
+) -> None:
+    key = aid(f"submit-{point}")
+    real_open = Store.open
+
+    def faulty(path: Path) -> Store:
+        return real_open(path, fault=FailAt(point))
+
+    monkeypatch.setattr(Store, "open", faulty)
+    code, out, err = cli("submit", "wf1", "--id", key)
+    assert (code, out) == (3, "") and f"--id {key}" in err
+    monkeypatch.undo()
+    assert cli("submit", "wf1", "--id", key)[:2] == (0, rerun)
 
 
 def test_dev_commands_need_a_dev_store(tmp_path: Path) -> None:
@@ -79,7 +103,8 @@ def test_dev_commands_need_a_dev_store(tmp_path: Path) -> None:
     plain("submit", "wf1")
     code, _, err = plain("dev", "run")
     assert code == 1 and "init --dev" in err
-    assert plain("dev", "release", "wf1/release/1", "activated")[0] == 1
+    code, out, err = plain("dev", "release", "wf1/release/1", "activated")
+    assert (code, out) == (1, "") and "init --dev" in err
 
 
 def test_bad_covers_and_missing_db_are_refused(cli: Cli, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,3 +148,35 @@ def test_validate_reports_errors_and_digest(tmp_path: Path) -> None:
     )
     code, out, _ = cli("validate", str(broken))
     assert code == 1 and "gate_bypass" in out
+
+
+def test_status_of_an_unknown_workflow_is_refused(cli: Cli) -> None:
+    code, _, err = cli("status", "nope")
+    assert code == 1 and "unknown workflow nope" in err
+
+
+def test_a_missing_store_says_to_init_without_a_retry_hint(tmp_path: Path) -> None:
+    code, _, err = Cli(tmp_path / "nothere.db")("submit", "wf1")
+    assert code == 1 and "livefactory init" in err and "--id" not in err
+
+
+def test_a_foreign_database_needs_maintenance_and_is_left_alone(tmp_path: Path) -> None:
+    other = tmp_path / "other.db"
+    with sqlite3.connect(other, isolation_level=None) as db:
+        db.execute("CREATE TABLE notes (text TEXT)")
+    code, _, err = Cli(other)("submit", "wf1")
+    assert code == 4 and "not a LiveFactory store" in err
+    with sqlite3.connect(other) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+
+
+def test_an_unreadable_pending_message_needs_maintenance(cli: Cli) -> None:
+    cli("submit", "wf1")
+    cli("dev", "run")
+    with sqlite3.connect(cli.db, isolation_level=None) as db:
+        db.execute(
+            "UPDATE outbox SET delivered = 0, body = '{\"__type__\": \"StartAttemptV2\"}'"
+            " WHERE id = (SELECT MAX(id) FROM outbox)"
+        )
+    for command in (("status",), ("dev", "run")):
+        assert cli(*command)[0] == 4

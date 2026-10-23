@@ -24,10 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covered by scenario tests and Hypothesis invariant tests.
 - CI type-checks with pyright (strict) and runs the tests.
 - SQLite store that commits each state change atomically with its outbox, checks the
-  stored state when it opens, and audits refused messages (ADR-0010).
+  stored state when it opens, and audits refused messages (ADR-0010). It refuses files
+  that are not stores without changing them, and reports damage as needing maintenance.
 - `livefactory` command line: submit, status, decide, answer, cancel, reject, grant,
   resolve and validate, with a `--id` key for safe reruns.
-- Plumber checks for workflow definitions, including the human-gate floor.
+- Plumber checks for workflow definitions, including the human-gate floor; unknown keys
+  in a definition file are refused.
 - Step-2 dev harness: a fake worker and a simulated supervisor for dev-mode stores.
 
 ### Changed

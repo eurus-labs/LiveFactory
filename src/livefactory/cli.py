@@ -11,7 +11,7 @@ rerun the same command with the same `--id`: a duplicate is answered from its
 receipt and applies nothing twice.
 
 Exit codes: 0 done (accepted, duplicate or late), 1 refused (rejected or
-conflict) or invalid input, 2 usage error, 3 store unavailable or locked
+conflict), invalid input or no store yet, 2 usage error, 3 store unavailable or locked
 (retry with the same --id), 4 store corrupt or incompatible (maintenance).
 """
 
@@ -75,7 +75,10 @@ def main(argv: Sequence[str] | None = None, out: TextIO = sys.stdout, err: TextI
     except _Refused as exc:
         print(f"refused: {exc}", file=err)
         return EXIT_REFUSED
-    except (StoreUnavailable, StoreLocked, StoreMissing) as exc:
+    except StoreMissing as exc:
+        print(f"refused: {exc}; run `livefactory init` first", file=err)
+        return EXIT_REFUSED
+    except (StoreUnavailable, StoreLocked) as exc:
         key = getattr(args, "id", None)
         hint = f"; rerun the same command with --id {key}" if key else ""
         print(f"store unavailable: {exc}{hint}", file=err)
@@ -150,9 +153,9 @@ def _resolve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 def _status(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     with Store.open(_db(args)) as store:
         state = store.state
-        workflows = [state.workflows[args.workflow]] if args.workflow else list(state.workflows.values())
         if args.workflow and args.workflow not in state.workflows:
             raise _Refused(f"unknown workflow {args.workflow}")
+        workflows = [state.workflows[args.workflow]] if args.workflow else list(state.workflows.values())
         for workflow in workflows:
             _print_workflow(store, workflow, out)
         print(f"undelivered messages: {len(store.pending_outbox())}", file=out)
