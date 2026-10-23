@@ -97,12 +97,26 @@ jobs:
       - name: Test (pytest and Hypothesis)
         run: uv run pytest
 
+  # A released minor or major version (dated in CHANGELOG.md) must have its section
+  # in docs/worth-knowing.md, so the release PR fails before anything is tagged.
+  worth-knowing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Released minor and major versions have worth-knowing notes
+        run: python scripts/check_worth_knowing.py CHANGELOG.md docs/worth-knowing.md
+
   # The one check a branch ruleset should require. Add every new job (build, test)
   # to needs; the check name stays the same. always(): a skipped required check
   # counts as passing, so this job must run and fail when anything above fails.
   verify:
     if: always()
-    needs: [conventional-commits, python]
+    needs: [conventional-commits, python, worth-knowing]
     runs-on: ubuntu-latest
     steps:
       - name: Every required job passed or was skipped for a bot
