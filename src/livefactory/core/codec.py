@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from livefactory.core import definition, events, model
 
@@ -58,10 +58,9 @@ def encode(value: object) -> Json:
             body[field.name] = encode(getattr(value, field.name))
         return body
     if isinstance(value, tuple):
-        items: tuple[object, ...] = value  # pyright: ignore[reportUnknownVariableType]
-        return [encode(item) for item in items]
+        return [encode(item) for item in cast(tuple[object, ...], value)]
     if isinstance(value, Mapping):
-        entries: Mapping[object, object] = value  # pyright: ignore[reportUnknownVariableType]
+        entries = cast(Mapping[object, object], value)
         pairs: list[Json] = []
         for key, item in entries.items():
             if not isinstance(key, str):
@@ -71,31 +70,36 @@ def encode(value: object) -> Json:
     raise CodecError(f"cannot encode {type(value).__name__}")
 
 
-def decode(data: Json) -> Any:
+def decode(data: object) -> Any:
+    """Rebuild a value from parsed JSON; anything unexpected raises CodecError."""
     if data is None or isinstance(data, bool | int | str):
         return data
     if isinstance(data, list):
-        return tuple(decode(item) for item in data)
-    if "__enum__" in data:
-        enum = _ENUMS.get(str(data["__enum__"]))
-        if enum is None:
-            raise CodecError(f"unknown enum {data['__enum__']!r}")
-        return enum(data["value"])
-    if "__map__" in data:
-        pairs = data["__map__"]
+        return tuple(decode(item) for item in cast(list[object], data))
+    if not isinstance(data, dict):
+        raise CodecError(f"unsupported JSON value {type(data).__name__}")
+    obj = cast(dict[str, object], data)
+    if "__enum__" in obj:
+        enum = _ENUMS.get(str(obj["__enum__"]))
+        if enum is None or "value" not in obj:
+            raise CodecError(f"unknown or incomplete enum {obj['__enum__']!r}")
+        return enum(obj["value"])
+    if "__map__" in obj:
+        pairs = obj["__map__"]
         if not isinstance(pairs, list):
             raise CodecError("__map__ must be a list of pairs")
         mapping: dict[str, Any] = {}
-        for pair in pairs:
-            if not (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)):
+        for pair in cast(list[object], pairs):
+            entry = cast(list[object], pair) if isinstance(pair, list) else []
+            if len(entry) != 2 or not isinstance(entry[0], str):
                 raise CodecError("__map__ entries must be [key, value] pairs")
-            mapping[pair[0]] = decode(pair[1])
+            mapping[entry[0]] = decode(entry[1])
         return mapping
-    if "__type__" in data:
-        cls = _CLASSES.get(str(data["__type__"]))
+    if "__type__" in obj:
+        cls = _CLASSES.get(str(obj["__type__"]))
         if cls is None:
-            raise CodecError(f"unknown class {data['__type__']!r}")
-        return cls(**{key: decode(item) for key, item in data.items() if key != "__type__"})
+            raise CodecError(f"unknown class {obj['__type__']!r}")
+        return cls(**{key: decode(item) for key, item in obj.items() if key != "__type__"})
     raise CodecError("untagged JSON object")
 
 
@@ -105,4 +109,10 @@ def dumps(value: object) -> str:
 
 
 def loads(text: str) -> Any:
-    return decode(json.loads(text))
+    """Decode canonical text. Any malformed input raises CodecError."""
+    try:
+        return decode(json.loads(text))
+    except CodecError:
+        raise
+    except (TypeError, KeyError, ValueError, RecursionError) as exc:
+        raise CodecError(f"{type(exc).__name__}: {exc}") from exc

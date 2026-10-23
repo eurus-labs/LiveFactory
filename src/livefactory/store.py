@@ -17,20 +17,31 @@ import fcntl
 import importlib.metadata
 import os
 import sqlite3
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 from livefactory.core import codec
 from livefactory.core.check import state_violations
-from livefactory.core.events import Event, Outbox
+from livefactory.core.events import (
+    AwaitDecision,
+    AwaitRelease,
+    Event,
+    Outbox,
+    RequestReconcile,
+    StartAttempt,
+    StopAttempt,
+    WorkflowEnded,
+)
 from livefactory.core.model import FactoryState, ReceiptOutcome, empty_state
 from livefactory.core.reducer import Transition, apply
 
 SCHEMA_VERSION = 1
+_OUTBOX_TYPES = (StartAttempt, StopAttempt, RequestReconcile, AwaitDecision, AwaitRelease, WorkflowEnded)
 
 _SCHEMA = (
     "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -140,60 +151,51 @@ class Store:
     def create(
         cls, path: Path, *, dev_mode: bool = False, clock: Clock = _utc_now, fault: Fault = _no_fault
     ) -> Self:
+        """Create a store atomically: a crash leaves no half-made store at `path`."""
         if path.exists():
             raise StoreError(f"{path} already exists")
         lock_fd = _lock(path)
         try:
-            connection = _connect(path)
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                for statement in _SCHEMA:
-                    connection.execute(statement)
-                connection.executemany(
-                    "INSERT INTO meta (key, value) VALUES (?, ?)",
-                    [
-                        ("schema_version", str(SCHEMA_VERSION)),
-                        ("created_by", core_version()),
-                        ("dev_mode", "1" if dev_mode else "0"),
-                    ],
-                )
-                connection.execute(
-                    "INSERT INTO state (id, seq, body) VALUES (1, 0, ?)",
-                    (codec.dumps(empty_state()),),
-                )
-                connection.execute("COMMIT")
-            except BaseException:
-                connection.close()
-                path.unlink(missing_ok=True)
-                raise
+            # Checked again under the lock: another process may have created
+            # it after the first check (only creators and openers take the lock).
+            if path.exists():
+                raise StoreError(f"{path} already exists")
+            _build(path, dev_mode)
+            return cls._open_locked(path, lock_fd, clock, fault)
         except BaseException:
             _unlock(lock_fd)
             raise
-        return cls(connection, lock_fd, empty_state(), 0, dev_mode, clock, fault)
 
     @classmethod
     def open(cls, path: Path, *, clock: Clock = _utc_now, fault: Fault = _no_fault) -> Self:
         if not path.exists():
-            raise StoreMissing(f"no store at {path}; create it first")
+            raise StoreMissing(f"no store at {path}; run `livefactory init` first")
         lock_fd = _lock(path)
+        try:
+            return cls._open_locked(path, lock_fd, clock, fault)
+        except BaseException:
+            _unlock(lock_fd)
+            raise
+
+    @classmethod
+    def _open_locked(cls, path: Path, lock_fd: int, clock: Clock, fault: Fault) -> Self:
         connection: sqlite3.Connection | None = None
         try:
-            connection = _connect(path)
+            connection = _connect_existing(path)
             state, seq, dev_mode = _load_checked(connection)
             store = cls(connection, lock_fd, state, seq, dev_mode, clock, fault)
             store._probe()
             return store
         except sqlite3.OperationalError as exc:
             _close_quietly(connection)
-            _unlock(lock_fd)
-            raise StoreUnavailable(f"{path}: {exc}") from exc
-        except sqlite3.DatabaseError as exc:
+            if _transient(exc):
+                raise StoreUnavailable(f"{path}: {exc}") from exc
+            raise StoreCorrupt(f"{path}: {_short(exc)}") from exc
+        except (sqlite3.DatabaseError, ValueError) as exc:  # includes UnicodeDecodeError
             _close_quietly(connection)
-            _unlock(lock_fd)
-            raise StoreCorrupt(f"{path}: {exc}") from exc
+            raise StoreCorrupt(f"{path}: {_short(exc)}") from exc
         except BaseException:
             _close_quietly(connection)
-            _unlock(lock_fd)
             raise
 
     def close(self) -> None:
@@ -227,7 +229,7 @@ class Store:
         rows = self._conn.execute(
             "SELECT id, body FROM outbox WHERE delivered = 0 ORDER BY id"
         ).fetchall()
-        return [(int(row[0]), codec.loads(str(row[1]))) for row in rows]
+        return [(int(row[0]), _decode(row[1], "outbox message")) for row in rows]
 
     def events(self) -> list[EventRecord]:
         rows = self._conn.execute(
@@ -235,7 +237,7 @@ class Store:
             " FROM events ORDER BY seq"
         ).fetchall()
         return [
-            EventRecord(int(r[0]), r[1], r[2], r[3], r[4], r[5], codec.loads(str(r[6])))
+            EventRecord(int(r[0]), r[1], r[2], r[3], r[4], r[5], _decode(r[6], "event"))
             for r in rows
         ]
 
@@ -243,7 +245,7 @@ class Store:
         rows = self._conn.execute(
             "SELECT key, outcome, reason, received_at, body FROM audit ORDER BY id"
         ).fetchall()
-        return [AuditRecord(r[0], r[1], r[2], r[3], codec.loads(str(r[4]))) for r in rows]
+        return [AuditRecord(r[0], r[1], r[2], r[3], _decode(r[4], "audit record")) for r in rows]
 
     # -- writing --------------------------------------------------------------
 
@@ -359,13 +361,48 @@ class Store:
         self._conn.execute("COMMIT")
 
 
+_TABLES = frozenset({"meta", "state", "events", "outbox", "audit"})
+# SQLite result codes that mean "try again later", not "this file is damaged".
+_TRANSIENT_CODES = frozenset(
+    {
+        sqlite3.SQLITE_BUSY,
+        sqlite3.SQLITE_LOCKED,
+        sqlite3.SQLITE_NOMEM,
+        sqlite3.SQLITE_IOERR,
+        sqlite3.SQLITE_FULL,
+        sqlite3.SQLITE_CANTOPEN,
+        sqlite3.SQLITE_PROTOCOL,
+        sqlite3.SQLITE_READONLY,
+    }
+)
+
+
+def _transient(exc: sqlite3.Error) -> bool:
+    code = getattr(exc, "sqlite_errorcode", None)
+    return isinstance(code, int) and (code & 0xFF) in _TRANSIENT_CODES
+
+
+def _short(exc: BaseException) -> str:
+    text = str(exc)
+    return text if len(text) <= 200 else text[:200] + "..."
+
+
 def _lock(path: Path) -> int:
-    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    # Key the lock on the resolved path, so a symlink to the store shares it.
+    resolved = path.resolve()
+    lock_path = resolved.with_name(resolved.name + ".lock")
+    try:
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise StoreUnavailable(f"cannot open {lock_path}: {exc}") from exc
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         os.close(fd)
         raise StoreLocked(f"{path} is open in another process") from exc
+    except OSError as exc:
+        os.close(fd)
+        raise StoreUnavailable(f"cannot lock {lock_path}: {exc}") from exc
     return fd
 
 
@@ -374,13 +411,70 @@ def _unlock(fd: int) -> None:
     os.close(fd)
 
 
-def _connect(path: Path) -> sqlite3.Connection:
-    # isolation_level=None: no implicit transactions; every write is an explicit
-    # BEGIN IMMEDIATE ... COMMIT (spec section 5).
-    connection = sqlite3.connect(path, isolation_level=None)
-    connection.execute("PRAGMA journal_mode = WAL")
-    connection.execute("PRAGMA synchronous = FULL")
-    connection.execute("PRAGMA foreign_keys = ON")
+def _build(path: Path, dev_mode: bool) -> None:
+    """Write a complete new store next to `path`, then link it into place."""
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".init")
+    os.close(fd)
+    temp = Path(temp_name)
+    try:
+        try:
+            connection = sqlite3.connect(temp, isolation_level=None)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                for statement in _SCHEMA:
+                    connection.execute(statement)
+                connection.executemany(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)",
+                    [
+                        ("schema_version", str(SCHEMA_VERSION)),
+                        ("created_by", core_version()),
+                        ("dev_mode", "1" if dev_mode else "0"),
+                    ],
+                )
+                connection.execute(
+                    "INSERT INTO state (id, seq, body) VALUES (1, 0, ?)",
+                    (codec.dumps(empty_state()),),
+                )
+                connection.execute("COMMIT")
+            finally:
+                connection.close()
+        except sqlite3.Error as exc:
+            raise StoreUnavailable(f"could not create {path}: {exc}") from exc
+        try:
+            os.link(temp, path)
+        except FileExistsError as exc:
+            raise StoreError(f"{path} already exists") from exc
+        except OSError as exc:
+            raise StoreUnavailable(f"could not create {path}: {exc}") from exc
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _connect_existing(path: Path) -> sqlite3.Connection:
+    """Open an existing store; refuse files that are not stores before changing them."""
+    # mode=rw never creates a file; the WAL switch below happens only after
+    # the file is known to be a LiveFactory store.
+    connection = sqlite3.connect(
+        f"{path.resolve().as_uri()}?mode=rw", uri=True, isolation_level=None
+    )
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        if "meta" not in tables:
+            raise StoreIncompatible(f"{path} is not a LiveFactory store")
+        missing = _TABLES - tables
+        if missing:
+            raise StoreCorrupt(f"{path} is missing tables {sorted(missing)}")
+        # isolation_level=None: no implicit transactions; every write is an
+        # explicit BEGIN IMMEDIATE ... COMMIT (spec section 5).
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = FULL")
+        connection.execute("PRAGMA foreign_keys = ON")
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
@@ -392,9 +486,28 @@ def _close_quietly(connection: sqlite3.Connection | None) -> None:
             pass
 
 
+def _text(value: object) -> str:
+    """Stored text, read as bytes so bad UTF-8 is a decode error we classify."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def _decode(value: object, what: str) -> Any:
+    try:
+        return codec.loads(_text(value))
+    except (codec.CodecError, UnicodeDecodeError) as exc:
+        raise StoreCorrupt(f"{what} does not decode: {_short(exc)}") from exc
+
+
 def _load_checked(connection: sqlite3.Connection) -> tuple[FactoryState, int, bool]:
     """Read and vet the stored state (spec section 15.2: check before ready)."""
-    meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
+    meta = {
+        _text(key): _text(value)
+        for key, value in connection.execute(
+            "SELECT CAST(key AS BLOB), CAST(value AS BLOB) FROM meta"
+        ).fetchall()
+    }
     version = meta.get("schema_version")
     if version != str(SCHEMA_VERSION):
         raise StoreIncompatible(f"schema version {version!r}; this code handles {SCHEMA_VERSION}")
@@ -403,20 +516,28 @@ def _load_checked(connection: sqlite3.Connection) -> tuple[FactoryState, int, bo
     if connection.execute("PRAGMA foreign_key_check").fetchall():
         raise StoreCorrupt("foreign key check failed")
 
-    row = connection.execute("SELECT seq, body FROM state WHERE id = 1").fetchone()
+    row = connection.execute("SELECT seq, CAST(body AS BLOB) FROM state WHERE id = 1").fetchone()
     if row is None:
         raise StoreCorrupt("no state row")
-    seq, body = int(row[0]), str(row[1])
+    seq = int(row[0])
     last = connection.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
     if last is None or int(last[0]) != seq:
         raise StoreCorrupt(f"state is at event {seq} but the log ends at {last}")
-    try:
-        state = codec.loads(body)
-    except Exception as exc:
-        raise StoreCorrupt(f"stored state does not decode: {exc}") from exc
+    state = _decode(row[1], "stored state")
     if not isinstance(state, FactoryState):
         raise StoreCorrupt("stored state has the wrong type")
-    problems = state_violations(state)
+    try:
+        problems = state_violations(state)
+    except Exception as exc:  # wrong types inside a state that decoded
+        raise StoreCorrupt(f"stored state is malformed: {type(exc).__name__}: {_short(exc)}") from exc
     if problems:
         raise StoreCorrupt("stored state violates invariants: " + "; ".join(problems))
+
+    # Messages still to deliver must be readable by this version too.
+    for (body,) in connection.execute(
+        "SELECT CAST(body AS BLOB) FROM outbox WHERE delivered = 0"
+    ).fetchall():
+        message = _decode(body, "undelivered outbox message")
+        if not isinstance(message, _OUTBOX_TYPES):
+            raise StoreCorrupt("undelivered outbox message has the wrong type")
     return state, seq, meta.get("dev_mode") == "1"

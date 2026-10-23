@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -14,12 +17,14 @@ from livefactory.core import codec
 from livefactory.core.events import (
     Actor,
     DispatchJob,
+    Outbox,
     HumanDecision,
     ResolveConflict,
     ResultKind,
     Verdict,
 )
 from livefactory.core.model import ReceiptOutcome, WorkflowStatus
+from livefactory import store as store_module
 from livefactory.store import (
     Store,
     StoreCorrupt,
@@ -123,7 +128,9 @@ def test_t06_crash_after_commit_then_resend_is_a_duplicate(path: Path) -> None:
 
 
 def test_unwritable_store_fails_at_open(path: Path) -> None:
-    readonly = FailAt("probe", error=sqlite3.OperationalError("attempt to write a readonly database"))
+    error = sqlite3.OperationalError("attempt to write a readonly database")
+    error.sqlite_errorcode = sqlite3.SQLITE_READONLY
+    readonly = FailAt("probe", error=error)
     with pytest.raises(StoreUnavailable):
         Store.open(path, fault=readonly)
     Store.open(path).close()  # the lock was released
@@ -229,3 +236,179 @@ def test_a_file_that_is_not_a_database_is_corrupt(tmp_path: Path) -> None:
     bogus.write_bytes(b"this is not sqlite" * 100)
     with pytest.raises(StoreCorrupt):
         Store.open(bogus)
+
+
+def journal_mode(path: Path) -> str:
+    with raw(path) as db:
+        return str(db.execute("PRAGMA journal_mode").fetchone()[0])
+
+
+def test_invalid_utf8_in_the_state_is_corrupt(path: Path) -> None:
+    with raw(path) as db:
+        db.execute("UPDATE state SET body = CAST(? AS TEXT)", (b'{"__type__": "Fa\x8fctoryState"}',))
+    with pytest.raises(StoreCorrupt, match="does not decode"):
+        Store.open(path)
+
+
+def test_invalid_utf8_in_a_table_name_is_corrupt(path: Path) -> None:
+    with raw(path) as db:
+        db.execute("PRAGMA writable_schema = ON")
+        db.execute("UPDATE sqlite_master SET name = CAST(? AS TEXT) WHERE name = 'audit'", (b"au\x8fdit",))
+    with pytest.raises(StoreCorrupt):
+        Store.open(path)
+
+
+def test_a_missing_table_is_corrupt(path: Path) -> None:
+    with raw(path) as db:
+        db.execute("DROP TABLE outbox")
+    with pytest.raises(StoreCorrupt, match="missing tables"):
+        Store.open(path)
+
+
+def test_foreign_and_empty_files_are_refused_unchanged(tmp_path: Path) -> None:
+    foreign = tmp_path / "other.db"
+    with raw(foreign) as db:
+        db.execute("CREATE TABLE notes (text TEXT)")
+    with pytest.raises(StoreIncompatible, match="not a LiveFactory store"):
+        Store.open(foreign)
+    assert journal_mode(foreign) == "delete"
+
+    empty = tmp_path / "empty.db"
+    empty.touch()
+    with pytest.raises(StoreIncompatible):
+        Store.open(empty)
+    assert empty.stat().st_size == 0
+
+
+def test_a_symlink_shares_the_lock(path: Path) -> None:
+    alias = path.with_name("alias.db")
+    alias.symlink_to(path)
+    with Store.open(path):
+        with pytest.raises(StoreLocked):
+            Store.open(alias)
+
+
+def test_an_unwritable_lock_file_is_unavailable(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_open = os.open
+
+    def read_only(file: str | Path, flags: int, mode: int = 0o777) -> int:
+        if str(file).endswith(".lock"):
+            raise OSError(errno.EROFS, "Read-only file system", str(file))
+        return real_open(file, flags, mode)
+
+    monkeypatch.setattr(store_module.os, "open", read_only)
+    with pytest.raises(StoreUnavailable, match="Read-only"):
+        Store.open(path)
+
+
+def test_create_does_not_clobber_a_store_made_after_its_first_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "core.db"
+    with Store.create(db) as store:
+        store.submit(submit())
+    # The pre-lock check misses the store, as if another process created it
+    # just after; the check under the lock must see it.
+    real_exists = Path.exists
+    calls = 0
+
+    def exists(self: Path) -> bool:
+        nonlocal calls
+        if self == db:
+            calls += 1
+            if calls == 1:
+                return False
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    with pytest.raises(StoreError, match="already exists"):
+        Store.create(db)
+    monkeypatch.undo()
+    with Store.open(db) as store:
+        assert WF in store.state.workflows
+
+
+def test_an_undecodable_pending_message_is_corrupt(path: Path) -> None:
+    with Store.open(path) as store:
+        for event in to_gate():
+            store.submit(event)
+    with raw(path) as db:
+        db.execute(
+            "UPDATE outbox SET body = '{\"__type__\": \"StartAttemptV2\"}'"
+            " WHERE id = (SELECT MIN(id) FROM outbox WHERE delivered = 0)"
+        )
+    with pytest.raises(StoreCorrupt, match="outbox"):
+        Store.open(path)
+
+
+def test_a_mistyped_state_is_corrupt(path: Path) -> None:
+    with Store.open(path) as store:
+        store.submit(submit())
+    with raw(path) as db:
+        db.execute(
+            "UPDATE state SET body = replace(body, '\"technical_retries_used\":0',"
+            " '\"technical_retries_used\":\"0\"')"
+        )
+        assert '"technical_retries_used":"0"' in db.execute("SELECT body FROM state").fetchone()[0]
+    with pytest.raises(StoreCorrupt, match="malformed"):
+        Store.open(path)
+
+
+def test_a_damaged_index_fails_the_integrity_check(path: Path) -> None:
+    with Store.open(path) as store:
+        for event in to_gate():
+            store.submit(event)
+    with raw(path) as db:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        root = int(db.execute("SELECT rootpage FROM sqlite_master WHERE name = 'events_key'").fetchone()[0])
+        size = int(db.execute("PRAGMA page_size").fetchone()[0])
+    data = bytearray(path.read_bytes())
+    for i in range(root * size - 200, root * size):
+        data[i] ^= 0x55
+    path.write_bytes(bytes(data))
+    with pytest.raises(StoreCorrupt, match="integrity"):
+        Store.open(path)
+
+
+def test_a_dangling_outbox_row_fails_the_foreign_key_check(path: Path) -> None:
+    with raw(path) as db:
+        db.execute("INSERT INTO outbox (seq, body) VALUES (99, 'x')")
+    with pytest.raises(StoreCorrupt, match="foreign key"):
+        Store.open(path)
+
+
+def test_a_failed_audit_write_degrades_the_store(path: Path) -> None:
+    with Store.open(path) as store:
+        for event in to_gate():
+            store.submit(event)
+        row_id = store.pending_outbox()[0][0]
+    store = Store.open(path, fault=FailAt("before_commit"))
+    refused = store.submit(DispatchJob(job("nosuch"), aid("zz")))
+    assert refused.receipt.outcome is ReceiptOutcome.REJECTED
+    with pytest.raises(StoreUnavailable, match="degraded"):
+        store.submit(submit())
+    with pytest.raises(StoreUnavailable, match="degraded"):
+        store.mark_delivered(row_id)
+    store.close()
+    with Store.open(path) as store:
+        assert store.audit() == []
+        assert store.pending_outbox()[0][0] == row_id
+
+
+def test_a_failed_delivery_mark_keeps_the_message_pending(path: Path) -> None:
+    with Store.open(path) as store:
+        for event in to_gate():
+            store.submit(event)
+        row_id = store.pending_outbox()[0][0]
+    store = Store.open(path, fault=FailAt("before_commit"))
+    with pytest.raises(StoreUnavailable):
+        store.mark_delivered(row_id)
+    with pytest.raises(StoreUnavailable, match="degraded"):
+        store.mark_delivered(row_id)
+    store.close()
+    with Store.open(path) as store:
+        assert store.pending_outbox()[0][0] == row_id
+
+
+def test_outbox_types_match_the_outbox_alias() -> None:
+    assert set(store_module._OUTBOX_TYPES) == set(get_args(Outbox.__value__))  # pyright: ignore[reportPrivateUsage]
