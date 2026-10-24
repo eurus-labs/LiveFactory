@@ -85,7 +85,7 @@ flowchart TD
 | Publisher | Moving output into the artifact store after the worker stops ([ADR-0003](../adr/0003-workspace-output-publishing.md)) | Execute anything from the workspace |
 | Artifact store | `candidates.git` for code and a sha256 object store for everything else | Overwrite or delete an object in R0 |
 | Maintenance commands | Backup, restore, integrity checks, manual rollback | Replay the outbox after a restore |
-| Supervisor | Activation, observation and recovery of an approved release (section 12a) | Review source, call a model, coordinate work |
+| Supervisor | Activation, observation, a watch window and recovery of an approved release (section 12a) | Review source, call a model, coordinate work |
 | Release Store | A directory of immutable bundles plus an activation journal | Live inside the Operational Store |
 | Benchmark harness | Replaying the fixed task set against baseline and candidate | Be changed by the candidate it measures |
 
@@ -248,7 +248,7 @@ definition with an unbounded cycle or a missing limit.
 |---|---|---|
 | `max_technical_retries` | Re-runs after a technical failure, including a re-run after `outcome_unknown` reconciled as not executed | 2 |
 | `max_handoffs` | Times one job stopped to ask for human input | 3 |
-| `max_stage_executions` | Job occurrences of one stage in one workflow, including rework | 3 for Implementation |
+| `max_stage_executions` | Job occurrences of one stage in one workflow, including rework; for a plan in parts, per stage and part ([ADR-0012](../adr/0012-decision-packet-format.md)) | 3 for Implementation |
 | `execution_timeout` | Wall-clock time of one attempt, enforced by core | per stage |
 | `RuntimeMaxSec` | Hard ceiling in the unit file, enforced by systemd if core hangs | 2 h |
 | `stop_grace` | Time between stop request and forced kill | 10 s |
@@ -258,7 +258,8 @@ Rules:
 - `attempt_no` identifies executions and only increases. It is never compared with a limit.
 - A handoff resume does not consume a technical retry. A technical failure after three
   handoffs still has the full retry allowance.
-- Counters survive restarts, job ID changes and replanning.
+- Counters survive restarts, job ID changes and replanning. In a plan in parts, a part's
+  counters follow its `part_id`.
 - Reaching a limit gives `blocked(reason=retry_limit | handoff_limit | stage_limit)`.
   The operator may stop the workflow or grant a finite, explicit extra allowance that is
   recorded on the instance. Opening a new workflow to bypass a limit is not allowed.
@@ -310,6 +311,17 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
 - The packet must contain: the question, target revisions, choices, what changed since
   the last packet, key evidence, what is unverified, and impact when relevant. Its format
   belongs to the protected set ([ADR-0005](../adr/0005-self-improvement-scope.md)).
+- The format is `packet/1` ([ADR-0012](../adr/0012-decision-packet-format.md)): a
+  plain-text planner part with fixed fields and limits, and a core part that the worker
+  cannot set (revisions, previous decision, diff, choices, eligibility, limits, digest).
+  `direction_revision` and `plan_revision` are digests of those sections, never labels
+  the worker reports. A decision names both `covers` and `packet_digest`, and core
+  rejects it unless the digest is the gate's current packet.
+- Large work is planned in parts (2 to 12 leaf parts, at most two levels) inside one
+  packet, approved by **one** decision. The workflow implements and verifies each part
+  in dependency order on one candidate, runs integration checks against the acceptance
+  tests written with the plan, and releases once. Only a change to the approved tree
+  needs a new decision.
 
 Improvement workflow in R0:
 
@@ -426,12 +438,20 @@ the minimum:
   `active`/`previous` pointers, outside the Operational Store and outside every worker
   mount.
 - The supervisor is a deterministic state machine: `ready → activating → observing →
-  ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
+  watching → ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
   and a deadline; after a restart it reads the journal and checks the real target first.
 - Steps: preflight (decision, digests, health) → quiesce (stop dispatch; the building job
   has already ended) → activate (journal intent, swap the target, start) → observe
   (readiness, one read and write cycle, dispatch loop health) → record the receipt.
   On failure: recover to the previous version, or enter maintenance.
+- **Watch window** ([ADR-0011](../adr/0011-supervisor-watch-window.md)): after
+  observation, the supervisor keeps watching until a workflow submitted after activation
+  passes verification or `watch_hours` (default 24) pass, whichever comes first. A core crash
+  loop, failed readiness or a stalled dispatch loop in that window recovers to the
+  previous version and records an `activation_failed` incident. A storage fault
+  (`degraded_store`, confirmed by the supervisor's own storage probe) or a corrupt store
+  does not trigger recovery: the previous version shares the storage, so section 15.2
+  applies and a persistent fault enters maintenance. After the window, failures are incidents only.
 - Activation is allowed only when verification showed **both** directions: the candidate
   processes state written by the baseline, and the baseline processes state written by the
   candidate. Breaking schema changes are not activated in R0.

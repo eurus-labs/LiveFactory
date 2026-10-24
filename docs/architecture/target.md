@@ -244,7 +244,7 @@ upgrading core owns. If the journal cannot be read or written, the supervisor st
 activation or recovery and stays in maintenance.
 
 The supervisor is a small deterministic state machine: `ready → activating → observing →
-ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
+watching → ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
 and a deadline. After a restart it reads the journal and checks the real target before
 continuing.
 
@@ -256,7 +256,11 @@ continuing.
    Never run two core writers on one store.
 4. **Observe**: boot, readiness, one safe read and write cycle, and health of the dispatch
    loop. No production side effects during the first observation window.
-5. **Success**: record the active target and a durable receipt.
+5. **Success**: record the active target and a durable receipt, then **watch** the new
+   version until a workflow submitted after activation passes verification or
+   `watch_hours` pass, recovering
+   to the previous version if the core crash-loops or stalls in that window
+   ([ADR-0011](../adr/0011-supervisor-watch-window.md)).
 6. **Failure**: bounded recovery to a valid target, or maintenance and the operator.
 
 Recovery inside the target and range the human approved needs no new approval during an

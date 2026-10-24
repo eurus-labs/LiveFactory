@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Step-2 dev harness: a fake worker and a simulated supervisor for dev-mode stores.
 - `docs/worth-knowing.md`: per-release notes on decisions, guarantees and sharp edges.
   CI requires a section for every released minor and major version.
+- ADR-0011: after activating a release, the supervisor watches the new version until a
+  workflow submitted after activation passes verification or 24 hours pass, and rolls back if the core
+  crash-loops or stalls in that window.
+- ADR-0012: a fixed decision packet format. Revisions become digests of the packet's
+  content, decisions are bound to the packet digest, and a static review page separates
+  facts the core checked from what the planner claims. Large work is planned in parts
+  and approved once; each part is verified, the original goal is checked at the end,
+  and the finished candidate is released once.
 
 ### Changed
 
