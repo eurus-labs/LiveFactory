@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Build plans move out of ADRs into `docs/plan/`; ADRs record only the decisions that
-  shape the design (ADR-0014). The Ring 0 build order is now `docs/plan/ring-0.md`.
+  shape the design (ADR-0014). `docs/plan/rings.md` gives each ring's central feature and
+  exit criteria, and `docs/plan/ring-0.md` splits step 3 into reviewable slices.
 
 - Accept ADR-0007 (Python stack) and ADR-0008 (Claude Code as the first provider).
 
