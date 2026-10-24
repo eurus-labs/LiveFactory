@@ -21,5 +21,6 @@ live in [`docs/plan/`](../plan/), not in ADRs ([ADR-0014](0014-plans-live-outsid
 | [0012](0012-decision-packet-format.md) | A fixed decision packet format with core-computed revisions | Accepted |
 | [0013](0013-incident-origin.md) | Incident origin decides who fixes, not how urgently | Accepted |
 | [0014](0014-plans-live-outside-adrs.md) | ADRs record design drivers; plans live outside them | Accepted |
+| [0015](0015-knowledge-layer-openwiki.md) | Start the knowledge layer with an isolated OpenWiki | Proposed |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.
