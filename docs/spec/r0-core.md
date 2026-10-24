@@ -310,6 +310,12 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
 - The packet must contain: the question, target revisions, choices, what changed since
   the last packet, key evidence, what is unverified, and impact when relevant. Its format
   belongs to the protected set ([ADR-0005](../adr/0005-self-improvement-scope.md)).
+- The format is `packet/1` ([ADR-0012](../adr/0012-decision-packet-format.md)): a
+  plain-text planner part with fixed fields and limits, and a core part that the worker
+  cannot set (revisions, previous decision, diff, choices, eligibility, limits, digest).
+  `direction_revision` and `plan_revision` are digests of those sections, never labels
+  the worker reports. A decision names both `covers` and `packet_digest`, and core
+  rejects it unless the digest is the gate's current packet.
 
 Improvement workflow in R0:
 
