@@ -257,7 +257,8 @@ continuing.
 4. **Observe**: boot, readiness, one safe read and write cycle, and health of the dispatch
    loop. No production side effects during the first observation window.
 5. **Success**: record the active target and a durable receipt, then **watch** the new
-   version until a workflow passes verification on it or `watch_hours` pass, recovering
+   version until a workflow submitted after activation passes verification or
+   `watch_hours` pass, recovering
    to the previous version if the core crash-loops or stalls in that window
    ([ADR-0011](../adr/0011-supervisor-watch-window.md)).
 6. **Failure**: bounded recovery to a valid target, or maintenance and the operator.

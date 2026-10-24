@@ -439,8 +439,8 @@ the minimum:
   (readiness, one read and write cycle, dispatch loop health) → record the receipt.
   On failure: recover to the previous version, or enter maintenance.
 - **Watch window** ([ADR-0011](../adr/0011-supervisor-watch-window.md)): after
-  observation, the supervisor keeps watching until a workflow passes verification on the
-  new version or `watch_hours` (default 24) pass, whichever comes first. A core crash
+  observation, the supervisor keeps watching until a workflow submitted after activation
+  passes verification or `watch_hours` (default 24) pass, whichever comes first. A core crash
   loop, failed readiness or a stalled dispatch loop in that window recovers to the
   previous version and records an `activation_failed` incident. A corrupt store enters
   maintenance instead. After the window, failures are incidents only.

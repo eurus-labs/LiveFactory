@@ -24,9 +24,11 @@ verified before activation. The owner's priority is that the factory keeps runni
   `ready → activating → observing → watching → ready`, and `watching → recovering →
   ready | maintenance`.
 - The watch window ends at the first of:
-  - a workflow passing verification on the new version, which means it reaches
-    `external_release_pending` after activation (plan, human gate, implementation and
-    verification all ran on it);
+  - a workflow **submitted after activation** passing verification, which means it
+    reaches `external_release_pending`. Because it started on the new version, its plan,
+    human gate, implementation and verification all ran there. A workflow that was
+    already past planning before activation does not count: it would end the watch
+    without exercising the new version's planning or approval path;
   - `watch_hours` after activation; operator configuration, default 24.
 - While watching, the supervisor recovers to the `previous` version on:
   - the core unit hitting its systemd start limit, or failing readiness;
@@ -62,6 +64,9 @@ verified before activation. The owner's priority is that the factory keeps runni
   the operator although a known-good version exists.
 - **Watch forever**: a failure days later may come from the environment rather than the
   release, and rolling back blindly can make it worse.
+- **Count any workflow that reaches the release wait after activation**: one that was
+  approved or implemented before activation would end the watch without running the
+  new version's planning or approval path.
 - **End the window when a workflow succeeds**: a workflow succeeds only when its own
   release activates, which replaces the watched version, so the condition never tests
   the watched version end to end.
