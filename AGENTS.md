@@ -90,8 +90,9 @@ Use Problem → Design → Predict → Build → Validate → Learn.
 
 - What it is: LiveFactory, a self-improving software factory. Python 3.12+ managed with
   uv (ADR-0007); code in `src/livefactory/`, tests in `tests/`. `docs/spec/` is
-  normative, `docs/architecture/` is informative, `docs/adr/` records decisions; changing
-  an accepted ADR needs a new ADR.
+  normative, `docs/architecture/` is informative, `docs/adr/` records the decisions that
+  shape the design (changing an accepted one needs a new ADR), and `docs/plan/` holds
+  build plans, which change by ordinary pull request (ADR-0014).
 - Validate with: `uv sync --locked`, `uv run pyright` (strict) and `uv run pytest`. CI runs
   the same in the `python` job of the `commits` workflow; add each new check to that
   workflow's `verify` job.

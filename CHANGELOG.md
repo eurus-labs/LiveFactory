@@ -44,8 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR-0013: each incident records whether it came from the factory, an extension or the
   environment. Environment failures go to the operator instead of the factory's backlog;
   priority still follows impact and recurrence.
+- ADR-0015 (proposed): an isolated OpenWiki of the repository for human readers, measured
+  with a fixed question set from the start.
+- ADR-0016: a kernel shared by every project and improved only at home; each project pins
+  a kernel version and improves only its own workflows, prompts, skills and knowledge.
 
 ### Changed
+
+- Build plans move out of ADRs into `docs/plan/`; ADRs record only the decisions that
+  shape the design (ADR-0014). `docs/plan/rings.md` gives each ring's central feature and
+  exit criteria, and `docs/plan/ring-0.md` splits step 3 into reviewable slices.
 
 - Accept ADR-0007 (Python stack) and ADR-0008 (Claude Code as the first provider).
 

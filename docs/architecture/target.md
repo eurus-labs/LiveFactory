@@ -78,14 +78,16 @@ evidence. Deterministic checks carry the most weight.
 
 | Ring | Capability | Adds | Explicitly deferred |
 |---|---|---|---|
-| 0 | Self-hosting: a backlog item → one human gate → a verified candidate of LiveFactory → human release → activation with recovery | Core, SQLite, CLI, static Plumber, three department roles, worker units, model gateway, publisher, artifact store, minimal supervisor, Release Store, benchmark with a fixed task set, manual backup | Everything below |
-| 1 | User requests on other repositories; replace or add a real provider without touching core lifecycle; switch department versions at job boundaries | Workflow A, conformance suite, descriptor versioning, provider pinning, gate-floor check, Standard profile, hidden real-task benchmark | Hot swap of running jobs, HA, a generic plugin platform |
+| 0 | Self-hosting: a backlog item → one human gate → a verified candidate of LiveFactory → human release → activation with recovery | Core, SQLite, CLI, static Plumber, three department roles, worker units, model gateway, publisher, artifact store, minimal supervisor with a watch window, Release Store, decision packets, incident origin, benchmark with a fixed task set, manual backup; a deterministic code map and a human-facing knowledge layer alongside | Everything below |
+| 1 | User requests on other repositories; replace or add a real provider without touching core lifecycle; switch department versions at job boundaries | Workflow A, kernel packaging with a per-project layer, slot contracts with a conformance suite, descriptor versioning, provider pinning, gate-floor check, Standard profile, hidden real-task benchmark, workers reading the knowledge layer once measured | Hot swap of running jobs, HA, a generic plugin platform |
 | 2 | Harder changes: Escalated profile, isolated candidate store copies, richer recovery | Verification runner on store snapshots, independent Console admin path, schema migration procedure | Automatic approval, self-modification of supervisor or identity, automatic breaking migrations |
 | 3 | Scale where measurements show a bottleneck | Queues, storage, knowledge or infrastructure chosen from data; leases when execution leaves the host | A distributed design before the data asks for it |
 
 Ring 0 is self-hosting ([ADR-0009](../adr/0009-self-hosting-first-ring.md)): the factory's
 first customer is its own repository, so core, Plumber, the supervisor and the improvement
-loop all do real work from the start. Workflow A follows in Ring 1.
+loop all do real work from the start. Workflow A follows in Ring 1, on a kernel shared by
+every project ([ADR-0016](../adr/0016-kernel-and-project-layer.md)). The build plan for each
+ring is in [`docs/plan/`](../plan/rings.md).
 
 ## 5. Human gates by risk
 
@@ -345,7 +347,9 @@ tokens used. Knowledge never overrides decision records, active wiring or releas
 - The second worker provider and its interface; the first is set by
   [ADR-0008](../adr/0008-first-worker-provider.md).
 - Platform adapters for activation, publish and deploy, and provider-specific idempotency.
-- When to add automatic knowledge indexing, storage replication or multiple core workers.
+- The model provider for the knowledge layer ([ADR-0015](../adr/0015-knowledge-layer-openwiki.md),
+  paused by the owner), and when workers may read it.
+- When to add storage replication or multiple core workers.
 
 Changing an accepted contract (identity, admin independence, the state machine, delivery
 semantics, unknown outcomes, human release authorization) requires a new ADR and new
