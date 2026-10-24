@@ -1,8 +1,10 @@
 """Canonical JSON for core values: events, outbox messages, definitions and state.
 
 Every dataclass and enum is tagged with its class name, and only registered
-classes decode. JSON arrays decode to tuples because the model uses only
-tuples. Mappings are stored as ordered pairs: their order is meaningful (a
+classes decode, and every field of a decoded dataclass must match its
+annotation: a stored state is trusted once it loads (ADR-0010), so a value of
+the wrong shape must fail here rather than crash a later command. JSON arrays
+decode to tuples because the model uses only tuples. Mappings are stored as ordered pairs: their order is meaningful (a
 stage's routes, for one) and must survive `sort_keys`. `decode(encode(x)) == x`
 and `repr` is preserved.
 """
@@ -10,10 +12,12 @@ and `repr` is preserved.
 from __future__ import annotations
 
 import json
+import types
 from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import Any, cast
+from functools import cache
+from typing import Any, TypeAliasType, Union, cast, get_args, get_origin, get_type_hints
 
 from livefactory.core import definition, events, model
 
@@ -42,6 +46,48 @@ _CLASSES, _ENUMS = _registry()
 
 class CodecError(ValueError):
     pass
+
+
+@cache
+def _hints(cls: Callable[..., object]) -> dict[str, object]:
+    # Some modules import annotation-only names under TYPE_CHECKING; resolve
+    # against all three model modules.
+    names = {**vars(model), **vars(definition), **vars(events)}
+    return get_type_hints(cls, localns=names)
+
+
+def conforms(value: object, hint: object) -> bool:
+    """Whether a decoded value has the shape its annotation describes."""
+    if isinstance(hint, TypeAliasType):
+        return conforms(value, hint.__value__)
+    origin = get_origin(hint)
+    if origin is types.UnionType or origin is Union:
+        return any(conforms(value, option) for option in get_args(hint))
+    if hint is type(None):
+        return value is None
+    if hint is bool:
+        return type(value) is bool
+    if hint is int:
+        return type(value) is int
+    if hint is str:
+        return type(value) is str
+    if origin is tuple:
+        item, ellipsis = get_args(hint)
+        assert ellipsis is Ellipsis, f"only tuple[X, ...] is supported, not {hint}"
+        items = cast(tuple[object, ...], value) if isinstance(value, tuple) else None
+        return items is not None and all(conforms(entry, item) for entry in items)
+    if origin is Mapping:
+        key, item = get_args(hint)
+        assert key is str, f"only string-keyed mappings are supported, not {hint}"
+        entries = cast(Mapping[object, object], value) if isinstance(value, Mapping) else None
+        return entries is not None and all(
+            type(k) is str and conforms(v, item) for k, v in entries.items()
+        )
+    if isinstance(hint, type):
+        cls = cast(type[object], hint)
+        if issubclass(cls, Enum) or is_dataclass(cls):
+            return isinstance(value, cls)
+    raise AssertionError(f"unsupported annotation {hint!r}")
 
 
 def encode(value: object) -> Json:
@@ -99,7 +145,12 @@ def decode(data: object) -> Any:
         cls = _CLASSES.get(str(obj["__type__"]))
         if cls is None:
             raise CodecError(f"unknown class {obj['__type__']!r}")
-        return cls(**{key: decode(item) for key, item in obj.items() if key != "__type__"})
+        values = {key: decode(item) for key, item in obj.items() if key != "__type__"}
+        built = cls(**values)
+        for name, hint in _hints(cls).items():
+            if not conforms(getattr(built, name), hint):
+                raise CodecError(f"{obj['__type__']}.{name} has the wrong type")
+        return built
     raise CodecError("untagged JSON object")
 
 

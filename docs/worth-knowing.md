@@ -19,8 +19,8 @@ ADR or spec section that holds the full reasoning.
   committed together, or none of them are. Delivery from the outbox is at least once, so
   every consumer must tolerate a repeated message.
 - **The store is checked before it is used.** Opening runs SQLite integrity and
-  foreign-key checks, decodes the state, checks its invariants and pending messages, and
-  makes a test write. A store that fails is never partly trusted
+  foreign-key checks, decodes the state with every field checked against its declared
+  type, checks its invariants and pending messages, and makes a test write. A store that fails is never partly trusted
   ([spec section 15.2](spec/r0-core.md#152-when-the-store-cannot-be-written)).
 
 ### Operating it
@@ -57,7 +57,5 @@ ADR or spec section that holds the full reasoning.
   [ADR-0009](adr/0009-self-hosting-first-ring.md)).
 - Receipt fingerprints use `repr(event)`. Changing an event's fields across an upgrade
   turns a resend into a conflict instead of a duplicate.
-- The codec does not check field types against their annotations. A mistyped stored
-  state is caught only if the invariant check trips over it.
 - The stage execution check is a lower bound: an inflated counter blocks a stage early
   (a human can `grant`) but is not reported as damage.

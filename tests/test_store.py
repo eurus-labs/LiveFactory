@@ -350,7 +350,7 @@ def test_a_mistyped_state_is_corrupt(path: Path) -> None:
             " '\"technical_retries_used\":\"0\"')"
         )
         assert '"technical_retries_used":"0"' in db.execute("SELECT body FROM state").fetchone()[0]
-    with pytest.raises(StoreCorrupt, match="malformed"):
+    with pytest.raises(StoreCorrupt, match="wrong type"):
         Store.open(path)
 
 
@@ -412,3 +412,25 @@ def test_a_failed_delivery_mark_keeps_the_message_pending(path: Path) -> None:
 
 def test_outbox_types_match_the_outbox_alias() -> None:
     assert set(store_module._OUTBOX_TYPES) == set(get_args(Outbox.__value__))  # pyright: ignore[reportPrivateUsage]
+
+
+def test_receipts_of_the_wrong_shape_are_corrupt(path: Path) -> None:
+    with Store.open(path) as store:
+        store.submit(submit())
+        state = store.state
+    damaged = replace(state, receipts=tuple(state.receipts.items()))  # type: ignore[arg-type]
+    with raw(path) as db:
+        db.execute("UPDATE state SET body = ?", (codec.dumps(damaged),))
+    with pytest.raises(StoreCorrupt, match="FactoryState.receipts has the wrong type"):
+        Store.open(path)
+
+
+def test_a_finished_workflow_with_a_live_job_is_corrupt(path: Path) -> None:
+    with Store.open(path) as store:
+        store.submit(submit())
+        state = store.state
+    finished = replace(state.workflows[WF], status=WorkflowStatus.SUCCEEDED)
+    with raw(path) as db:
+        db.execute("UPDATE state SET body = ?", (codec.dumps(replace(state, workflows={WF: finished})),))
+    with pytest.raises(StoreCorrupt, match="unsettled job"):
+        Store.open(path)

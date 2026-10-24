@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import typing
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -64,3 +66,35 @@ def test_states_round_trip(state: FactoryState) -> None:
 def test_unknown_or_malformed_input_is_refused(text: str) -> None:
     with pytest.raises((codec.CodecError, ValueError)):
         codec.loads(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"__type__":"Revisions","profile":1,"direction":"d","plan":"p"}',
+        '{"__type__":"Job","job_id":"j","workflow_id":"w","stage_id":"s","occurrence":true,'
+        '"status":{"__enum__":"JobStatus","value":"pending"}}',
+        '{"__type__":"Receipt","key":"k","outcome":"accepted"}',
+        '{"__type__":"GoTo","stage":["a"]}',
+    ],
+)
+def test_fields_must_match_their_annotations(text: str) -> None:
+    with pytest.raises(codec.CodecError, match="wrong type"):
+        codec.loads(text)
+
+
+def test_every_registered_annotation_is_supported() -> None:
+    # conforms() fails closed on an annotation it does not know; walk every
+    # field so a new field type is caught here, not when a store first loads.
+    def walk(hint: object) -> None:
+        for option in typing.get_args(hint):
+            if option is not Ellipsis:
+                walk(option)
+        if isinstance(hint, typing.TypeAliasType):
+            walk(hint.__value__)
+        elif not typing.get_args(hint):
+            codec.conforms(None, hint)
+
+    for cls in codec._CLASSES.values():  # pyright: ignore[reportPrivateUsage]
+        for hint in codec._hints(cls).values():  # pyright: ignore[reportPrivateUsage]
+            walk(hint)
