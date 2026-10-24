@@ -14,6 +14,7 @@ the supervisor come next. The design is in [`docs/`](docs/):
 - [Target architecture](docs/architecture/target.md): where later rings are heading,
   including self-improvement and release.
 - [Architecture decision records](docs/adr/): each decision with its trade-offs.
+- [Ring 0 build plan](docs/plan/ring-0.md): the build steps and where they stand.
 - [Worth knowing](docs/worth-knowing.md): per release, what to understand before you run
   or change it.
 

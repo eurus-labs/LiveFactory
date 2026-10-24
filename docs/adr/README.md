@@ -1,8 +1,9 @@
 # Architecture Decision Records
 
-Each ADR records one decision with its trade-offs. An `Accepted` ADR is changed only by
-a new ADR that supersedes it, with new acceptance evidence where the decision affects a
-contract in [`docs/spec/`](../spec/).
+Each ADR records one decision that shapes the design, with its trade-offs. An `Accepted`
+ADR is changed only by a new ADR that supersedes it, with new acceptance evidence where
+the decision affects a contract in [`docs/spec/`](../spec/). Build order and other plans
+live in [`docs/plan/`](../plan/), not in ADRs ([ADR-0014](0014-plans-live-outside-adrs.md)).
 
 | ADR | Decision | Status |
 |---|---|---|
@@ -19,5 +20,6 @@ contract in [`docs/spec/`](../spec/).
 | [0011](0011-supervisor-watch-window.md) | The supervisor watches a new version until it proves itself | Accepted |
 | [0012](0012-decision-packet-format.md) | A fixed decision packet format with core-computed revisions | Accepted |
 | [0013](0013-incident-origin.md) | Incident origin decides who fixes, not how urgently | Accepted |
+| [0014](0014-plans-live-outside-adrs.md) | ADRs record design drivers; plans live outside them | Accepted |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.

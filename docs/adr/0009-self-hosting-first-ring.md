@@ -1,6 +1,7 @@
 # ADR-0009: Self-hosting first ring
 
-- Status: Accepted
+- Status: Accepted; build order superseded by [ADR-0014](0014-plans-live-outside-adrs.md),
+  now in [`docs/plan/ring-0.md`](../plan/ring-0.md)
 - Date: 2026-10-19
 - Supersedes: the ring order in ADR-0005 decision 1 and "Applies from: Ring 2" in ADR-0004
 
