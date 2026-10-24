@@ -27,6 +27,7 @@ from hypothesis.stateful import (
 # Hypothesis leaves this function's parameters unannotated.
 from hypothesis.stateful import run_state_machine_as_test  # pyright: ignore[reportUnknownVariableType]
 
+from livefactory.core.check import state_violations
 from livefactory.core.definition import COMPACT_IMPROVEMENT, Route, StageKind
 from livefactory.core.events import (
     Actor,
@@ -69,6 +70,8 @@ from livefactory.core.model import (
 )
 from livefactory.core.reducer import Transition, apply, approval_covers_current, dispatchable_jobs
 
+from tests.core.support import aid
+
 WORKFLOWS = ("wf1", "wf2")
 REVISIONS = (
     Revisions("compact@1", "dir@1", "plan@1"),
@@ -105,6 +108,9 @@ class CoreMachine(RuleBasedStateMachine):
         self.check_transition(before, event, transition)
         return transition
 
+    def fresh_attempt(self) -> str:
+        return aid(self.fresh("a"))
+
     def fresh(self, prefix: str) -> str:
         self.command_counter += 1
         return f"{prefix}{self.command_counter}"
@@ -131,7 +137,7 @@ class CoreMachine(RuleBasedStateMachine):
         )
         events: list[Event] = [
             SubmitWorkflow(self.fresh("c"), workflow_id, COMPACT_IMPROVEMENT, actor),
-            DispatchJob(job_id, self.fresh("a")),
+            DispatchJob(job_id, self.fresh_attempt()),
             AttemptStarted(attempt_id),
             AttemptFinished(attempt_id, payload),
             AttemptLost(attempt_id),
@@ -173,7 +179,7 @@ class CoreMachine(RuleBasedStateMachine):
     def happy_step(self) -> None:
         """Take the most forward valid step available, so runs also reach the end."""
         if ready := dispatchable_jobs(self.state):
-            self.step(DispatchJob(ready[0], self.fresh("a")))
+            self.step(DispatchJob(ready[0], self.fresh_attempt()))
         elif active := self.live_attempts(*ATTEMPT_ACTIVE):
             job = self.state.jobs[self.state.attempts[active[0]].job_id]
             stage = self.state.workflows[job.workflow_id].definition.stages[job.stage_id]
@@ -211,7 +217,7 @@ class CoreMachine(RuleBasedStateMachine):
     @rule(data=st.data())
     def dispatch_ready(self, data: st.DataObject) -> None:
         job_id = data.draw(st.sampled_from(dispatchable_jobs(self.state)))
-        transition = self.step(DispatchJob(job_id, self.fresh("a")))
+        transition = self.step(DispatchJob(job_id, self.fresh_attempt()))
         assert transition.receipt.outcome is ReceiptOutcome.ACCEPTED, transition.receipt
 
     @precondition(lambda self: bool(self.jobs_where(JobStatus.PENDING, StageKind.WORKER)))
@@ -219,7 +225,7 @@ class CoreMachine(RuleBasedStateMachine):
     def dispatch_pending(self, data: st.DataObject) -> None:
         """Dispatch any pending job, including while another attempt runs."""
         job_id = data.draw(st.sampled_from(self.jobs_where(JobStatus.PENDING, StageKind.WORKER)))
-        self.step(DispatchJob(job_id, self.fresh("a")))
+        self.step(DispatchJob(job_id, self.fresh_attempt()))
 
     @precondition(lambda self: bool(self.live_attempts(AttemptStatus.DISPATCHED)))
     @rule(data=st.data())
@@ -395,6 +401,11 @@ class CoreMachine(RuleBasedStateMachine):
                 assert new_workflow.stage_executions[stage_id] >= count
 
     # -- state invariants --------------------------------------------------
+
+    @invariant()
+    def structurally_sound(self) -> None:
+        # The same check the store runs on a state it loads from disk.
+        assert state_violations(self.state) == []
 
     @invariant()
     def at_most_one_execution(self) -> None:

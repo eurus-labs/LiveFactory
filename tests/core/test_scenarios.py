@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from livefactory.core.check import state_violations
 from livefactory.core.definition import COMPACT_IMPROVEMENT
 from livefactory.core.events import (
     Actor,
@@ -28,13 +31,14 @@ from livefactory.core.events import (
     Verdict,
     WorkflowEnded,
 )
-from livefactory.core.model import JobStatus, ReceiptOutcome, Revisions, WorkflowStatus
+from livefactory.core.model import AttemptStatus, JobStatus, ReceiptOutcome, Revisions, WorkflowStatus
 from livefactory.core.reducer import apply, dispatchable_jobs
 
 from tests.core.support import (
     BUNDLE,
     REVS,
     WF,
+    aid,
     approve,
     finish,
     job,
@@ -100,7 +104,7 @@ def test_t03_late_approval_for_old_plan_does_not_open_implementation() -> None:
             HumanDecision("d1", job("approve"), REVS, Verdict.REVISE, Actor.HUMAN),
             *run_attempt(
                 job("plan", 2),
-                "a-plan2",
+                aid("a-plan2"),
                 result(ResultKind.SUCCEEDED, "packet_ready", "r-plan2", new_revs),
             ),
         ]
@@ -112,12 +116,12 @@ def test_t03_late_approval_for_old_plan_does_not_open_implementation() -> None:
 
 
 def test_t04_result_resent_same_or_different_digest() -> None:
-    state, _ = run([submit(), DispatchJob(job("plan"), "a1"), AttemptStarted("a1")])
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1")), AttemptStarted(aid("a1"))])
     payload = result(ResultKind.SUCCEEDED, "packet_ready", "r1", REVS)
-    first = apply(state, finish("a1", payload))
-    same = apply(first.state, finish("a1", payload))
+    first = apply(state, finish(aid("a1"), payload))
+    same = apply(first.state, finish(aid("a1"), payload))
     different = apply(
-        first.state, finish("a1", result(ResultKind.SUCCEEDED, "not_suitable", "r2"))
+        first.state, finish(aid("a1"), result(ResultKind.SUCCEEDED, "not_suitable", "r2"))
     )
 
     assert same.receipt.outcome is ReceiptOutcome.DUPLICATE
@@ -125,14 +129,14 @@ def test_t04_result_resent_same_or_different_digest() -> None:
     # The accepted result stays; the conflict blocks the workflow (spec section 8).
     assert different.state.jobs == first.state.jobs
     assert different.state.attempts == first.state.attempts
-    assert different.state.workflows[WF].result_conflicts == ("a1",)
-    assert first.state.attempts["a1"].result_digest == "r1"
+    assert different.state.workflows[WF].result_conflicts == (aid("a1"),)
+    assert first.state.attempts[aid("a1")].result_digest == "r1"
 
 
 def test_t05_result_before_started_completes_once() -> None:
     payload = result(ResultKind.SUCCEEDED, "packet_ready", "r1", REVS)
     state, transitions = run(
-        [submit(), DispatchJob(job("plan"), "a1"), finish("a1", payload), AttemptStarted("a1")]
+        [submit(), DispatchJob(job("plan"), aid("a1")), finish(aid("a1"), payload), AttemptStarted(aid("a1"))]
     )
 
     assert state.jobs[job("plan")].status is JobStatus.SUCCEEDED
@@ -141,9 +145,9 @@ def test_t05_result_before_started_completes_once() -> None:
 
 
 def test_t07_dispatch_cannot_start_a_second_execution() -> None:
-    state, _ = run([submit(), DispatchJob(job("plan"), "a1")])
-    replay = apply(state, DispatchJob(job("plan"), "a1"))
-    other = apply(state, DispatchJob(job("plan"), "a2"))
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    replay = apply(state, DispatchJob(job("plan"), aid("a1")))
+    other = apply(state, DispatchJob(job("plan"), aid("a2")))
 
     assert replay.receipt.outcome is ReceiptOutcome.DUPLICATE
     assert replay.outbox == ()
@@ -153,9 +157,9 @@ def test_t07_dispatch_cannot_start_a_second_execution() -> None:
 
 def test_one_worker_at_a_time_across_workflows() -> None:
     second = SubmitWorkflow("c-submit2", "wf2", COMPACT_IMPROVEMENT, Actor.HUMAN)
-    state, _ = run([submit(), second, DispatchJob(job("plan"), "a1")])
+    state, _ = run([submit(), second, DispatchJob(job("plan"), aid("a1"))])
 
-    busy = apply(state, DispatchJob("wf2/plan/1", "a2"))
+    busy = apply(state, DispatchJob("wf2/plan/1", aid("a2")))
     assert busy.receipt.reason == "worker_busy"
     assert dispatchable_jobs(state) == ()
 
@@ -164,10 +168,10 @@ def test_t10_handoffs_do_not_consume_technical_retries() -> None:
     events = [submit()]
     for n in range(3):
         events += [
-            *run_attempt(job("plan"), f"a{n}", HANDOFF),
+            *run_attempt(job("plan"), aid(f"a{n}"), HANDOFF),
             AnswerHandoff(f"c-answer{n}", job("plan"), Actor.HUMAN),
         ]
-    events += run_attempt(job("plan"), "a-fail", FAILED_TECHNICALLY)
+    events += run_attempt(job("plan"), aid("a-fail"), FAILED_TECHNICALLY)
     state, _ = run(events)
 
     plan = state.jobs[job("plan")]
@@ -180,10 +184,10 @@ def test_handoff_beyond_limit_blocks_until_granted() -> None:
     events = [submit()]
     for n in range(3):
         events += [
-            *run_attempt(job("plan"), f"a{n}", HANDOFF),
+            *run_attempt(job("plan"), aid(f"a{n}"), HANDOFF),
             AnswerHandoff(f"c-answer{n}", job("plan"), Actor.HUMAN),
         ]
-    events += run_attempt(job("plan"), "a3", HANDOFF)
+    events += run_attempt(job("plan"), aid("a3"), HANDOFF)
     state, _ = run(events)
     assert state.jobs[job("plan")].reason == "handoff_limit"
 
@@ -195,7 +199,7 @@ def test_handoff_beyond_limit_blocks_until_granted() -> None:
 def test_t11_retry_limit_blocks_and_grant_is_finite() -> None:
     events = [submit()]
     for n in range(3):
-        events += run_attempt(job("plan"), f"a{n}", FAILED_TECHNICALLY)
+        events += run_attempt(job("plan"), aid(f"a{n}"), FAILED_TECHNICALLY)
     state, _ = run(events)
 
     plan = state.jobs[job("plan")]
@@ -218,8 +222,8 @@ def test_t11_rework_stops_at_stage_limit() -> None:
     candidate = result(ResultKind.SUCCEEDED, "candidate_ready", "r-c")
     events = [*to_implement()]
     for n in range(1, 4):
-        events += run_attempt(job("implement", n), f"ai{n}", candidate)
-        events += run_attempt(job("verify", n), f"av{n}", changes)
+        events += run_attempt(job("implement", n), aid(f"ai{n}"), candidate)
+        events += run_attempt(job("verify", n), aid(f"av{n}"), changes)
     state, _ = run(events)
 
     assert state.workflows[WF].stage_executions["implement"] == 3
@@ -229,13 +233,13 @@ def test_t11_rework_stops_at_stage_limit() -> None:
 
 
 def test_t12_cancel_while_running_waits_for_the_real_outcome() -> None:
-    state, _ = run([submit(), DispatchJob(job("plan"), "a1"), AttemptStarted("a1")])
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1")), AttemptStarted(aid("a1"))])
     stopping = apply(state, StopWorkflow("c-stop", WF, StopIntent.CANCEL, Actor.HUMAN))
 
     assert stopping.state.workflows[WF].status is WorkflowStatus.CANCELLING
-    assert StopAttempt("a1") in stopping.outbox
+    assert StopAttempt(aid("a1")) in stopping.outbox
 
-    won = apply(stopping.state, finish("a1", result(ResultKind.SUCCEEDED, "packet_ready", "r1")))
+    won = apply(stopping.state, finish(aid("a1"), result(ResultKind.SUCCEEDED, "packet_ready", "r1")))
     assert won.state.jobs[job("plan")].status is JobStatus.SUCCEEDED
     assert won.state.workflows[WF].status is WorkflowStatus.CANCELLED
     assert job("approve") not in won.state.jobs
@@ -245,35 +249,35 @@ def test_t12_unknown_effect_keeps_workflow_cancelling() -> None:
     state, _ = run(
         [
             submit(),
-            DispatchJob(job("plan"), "a1"),
-            AttemptStarted("a1"),
+            DispatchJob(job("plan"), aid("a1")),
+            AttemptStarted(aid("a1")),
             StopWorkflow("c-stop", WF, StopIntent.CANCEL, Actor.HUMAN),
         ]
     )
-    lost = apply(state, AttemptLost("a1"))
-    assert RequestReconcile("a1") in lost.outbox
+    lost = apply(state, AttemptLost(aid("a1")))
+    assert RequestReconcile(aid("a1")) in lost.outbox
     assert lost.state.workflows[WF].status is WorkflowStatus.CANCELLING
 
-    settled = apply(lost.state, Reconciled("a1", Finding.NOT_APPLIED))
+    settled = apply(lost.state, Reconciled(aid("a1"), Finding.NOT_APPLIED))
     assert settled.state.jobs[job("plan")].status is JobStatus.CANCELLED
     assert settled.state.workflows[WF].status is WorkflowStatus.CANCELLED
 
 
 def test_lost_attempt_is_not_retried_before_reconciliation() -> None:
-    state, _ = run([submit(), DispatchJob(job("plan"), "a1"), AttemptLost("a1")])
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1")), AttemptLost(aid("a1"))])
 
     assert state.jobs[job("plan")].status is JobStatus.OUTCOME_UNKNOWN
     assert dispatchable_jobs(state) == ()
-    assert apply(state, DispatchJob(job("plan"), "a2")).receipt.reason == "job_not_pending"
+    assert apply(state, DispatchJob(job("plan"), aid("a2"))).receipt.reason == "job_not_pending"
 
-    retried = apply(state, Reconciled("a1", Finding.NOT_APPLIED)).state
+    retried = apply(state, Reconciled(aid("a1"), Finding.NOT_APPLIED)).state
     assert retried.jobs[job("plan")].status is JobStatus.PENDING
     assert retried.jobs[job("plan")].technical_retries_used == 1
 
 
 def test_t21_out_of_scope_is_rejected() -> None:
     state, transitions = run(
-        [submit(), *run_attempt(job("plan"), "a1", result(ResultKind.SUCCEEDED, "not_suitable", "r"))]
+        [submit(), *run_attempt(job("plan"), aid("a1"), result(ResultKind.SUCCEEDED, "not_suitable", "r"))]
     )
     assert state.workflows[WF].status is WorkflowStatus.REJECTED
     assert outbox(transitions)[-1] == WorkflowEnded(WF, WorkflowStatus.REJECTED, "not_suitable")
@@ -300,10 +304,10 @@ def test_scope_change_voids_the_previous_approval() -> None:
     state, _ = run(
         [
             *to_implement(),
-            *run_attempt(job("implement"), "ai", result(ResultKind.SUCCEEDED, "candidate_ready", "r")),
-            *run_attempt(job("verify"), "av", result(ResultKind.SUCCEEDED, "scope_change", "r")),
+            *run_attempt(job("implement"), aid("ai"), result(ResultKind.SUCCEEDED, "candidate_ready", "r")),
+            *run_attempt(job("verify"), aid("av"), result(ResultKind.SUCCEEDED, "scope_change", "r")),
             *run_attempt(
-                job("plan", 2), "ap2", result(ResultKind.SUCCEEDED, "packet_ready", "r", new_revs)
+                job("plan", 2), aid("ap2"), result(ResultKind.SUCCEEDED, "packet_ready", "r", new_revs)
             ),
         ]
     )
@@ -363,7 +367,7 @@ def test_cancel_during_release_waits_for_the_supervisor() -> None:
 
 def test_undeclared_outcome_fails_the_workflow() -> None:
     state, _ = run(
-        [submit(), *run_attempt(job("plan"), "a1", result(ResultKind.SUCCEEDED, "surprise", "r"))]
+        [submit(), *run_attempt(job("plan"), aid("a1"), result(ResultKind.SUCCEEDED, "surprise", "r"))]
     )
     workflow = state.workflows[WF]
     assert (workflow.status, workflow.ending_reason) == (
@@ -374,16 +378,16 @@ def test_undeclared_outcome_fails_the_workflow() -> None:
 
 def test_conflicting_result_blocks_progress_until_resolved() -> None:
     state, _ = run(to_implement())
-    contradicted = apply(state, finish("a-plan", result(ResultKind.SUCCEEDED, "not_suitable", "r-other")))
+    contradicted = apply(state, finish(aid("a-plan"), result(ResultKind.SUCCEEDED, "not_suitable", "r-other")))
 
     assert contradicted.receipt.outcome is ReceiptOutcome.CONFLICT
     assert contradicted.state.jobs == state.jobs
     assert contradicted.state.workflows[WF].status is WorkflowStatus.BLOCKED
     assert dispatchable_jobs(contradicted.state) == ()
-    assert apply(contradicted.state, DispatchJob(job("implement"), "ai")).receipt.reason == (
+    assert apply(contradicted.state, DispatchJob(job("implement"), aid("ai"))).receipt.reason == (
         "result_conflict"
     )
-    again = apply(contradicted.state, finish("a-plan", result(ResultKind.SUCCEEDED, "x", "r-third")))
+    again = apply(contradicted.state, finish(aid("a-plan"), result(ResultKind.SUCCEEDED, "x", "r-third")))
     assert again.state == contradicted.state
 
     worker = apply(contradicted.state, ResolveConflict("c-res", WF, Actor.WORKER))
@@ -396,7 +400,7 @@ def test_conflicting_result_blocks_progress_until_resolved() -> None:
 def test_conflict_after_release_prevents_success() -> None:
     state, _ = run(to_release())
     contradicted = apply(
-        state, finish("a-ver", result(ResultKind.SUCCEEDED, "changes_required", "r-other"))
+        state, finish(aid("a-ver"), result(ResultKind.SUCCEEDED, "changes_required", "r-other"))
     ).state
     activated = apply(contradicted, release(ReleaseOutcome.ACTIVATED)).state
 
@@ -411,9 +415,9 @@ def test_guarded_stage_cannot_change_revisions_without_approval() -> None:
     state, transitions = run(
         [
             *to_implement(),
-            *run_attempt(job("implement"), "ai", result(ResultKind.SUCCEEDED, "candidate_ready", "r")),
+            *run_attempt(job("implement"), aid("ai"), result(ResultKind.SUCCEEDED, "candidate_ready", "r")),
             *run_attempt(
-                job("verify"), "av", result(ResultKind.SUCCEEDED, "pass", "r", sneaky, BUNDLE)
+                job("verify"), aid("av"), result(ResultKind.SUCCEEDED, "pass", "r", sneaky, BUNDLE)
             ),
         ]
     )
@@ -424,3 +428,61 @@ def test_guarded_stage_cannot_change_revisions_without_approval() -> None:
     )
     assert job("release") not in state.jobs
     assert not any(isinstance(m, AwaitRelease) for m in outbox(transitions))
+
+
+def test_dispatch_requires_a_canonical_ulid() -> None:
+    state, _ = run([submit()])
+    for bad in ["a1", aid("x").lower(), aid("x")[:25], "8" + aid("x")[1:], aid("x")[:-1] + "U"]:
+        assert apply(state, DispatchJob(job("plan"), bad)).receipt.reason == "invalid_attempt_id"
+    assert apply(state, DispatchJob(job("plan"), aid("x"))).receipt.outcome is ReceiptOutcome.ACCEPTED
+
+
+def test_state_checks_flag_damage() -> None:
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    assert state_violations(state) == []
+    plan = state.jobs[job("plan")]
+    broken = replace(state, jobs={**state.jobs, plan.job_id: replace(plan, active_attempt_id=None)})
+    assert any("active attempt" in problem for problem in state_violations(broken))
+
+
+def test_state_checks_flag_unresolved_attempts_outside_their_job() -> None:
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    plan, attempt = state.jobs[job("plan")], state.attempts[aid("a1")]
+    orphaned = replace(
+        state,
+        jobs={**state.jobs, plan.job_id: replace(plan, status=JobStatus.PENDING, active_attempt_id=None)},
+        attempts={aid("a1"): replace(attempt, status=AttemptStatus.OUTCOME_UNKNOWN)},
+    )
+    assert any("not its job's active attempt" in p for p in state_violations(orphaned))
+    mismatched = replace(state, attempts={aid("a1"): replace(attempt, status=AttemptStatus.SUCCEEDED)})
+    assert any("does not match" in p for p in state_violations(mismatched))
+
+
+def test_state_checks_flag_counters_below_their_records() -> None:
+    state, _ = run([submit(), DispatchJob(job("plan"), aid("a1"))])
+    workflow, plan = state.workflows[WF], state.jobs[job("plan")]
+    uncounted = replace(state, workflows={WF: replace(workflow, stage_executions={})})
+    assert any("fewer executions" in p for p in state_violations(uncounted))
+    unstarted = replace(state, jobs={**state.jobs, plan.job_id: replace(plan, attempts_started=0)})
+    assert any("attempt_no outside" in p for p in state_violations(unstarted))
+
+
+def test_state_checks_accept_a_job_stopped_at_its_stage_limit() -> None:
+    changes = result(ResultKind.SUCCEEDED, "changes_required", "r-ch")
+    candidate = result(ResultKind.SUCCEEDED, "candidate_ready", "r-c")
+    events = [*to_implement()]
+    for n in range(1, 4):
+        events += run_attempt(job("implement", n), aid(f"ai{n}"), candidate)
+        events += run_attempt(job("verify", n), aid(f"av{n}"), changes)
+    events.append(StopWorkflow("c-stop", WF, StopIntent.CANCEL, Actor.HUMAN))
+    state, _ = run(events)
+    assert state.jobs[job("implement", 4)].status is JobStatus.CANCELLED
+    assert state_violations(state) == []
+
+
+def test_a_finished_workflow_never_dispatches() -> None:
+    state, _ = run([submit()])
+    finished = replace(state, workflows={WF: replace(state.workflows[WF], status=WorkflowStatus.SUCCEEDED)})
+    assert any("unsettled job" in p for p in state_violations(finished))
+    assert dispatchable_jobs(finished) == ()
+    assert apply(finished, DispatchJob(job("plan"), aid("x"))).receipt.reason == "workflow_ended"

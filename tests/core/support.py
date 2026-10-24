@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 
 from livefactory.core.definition import COMPACT_IMPROVEMENT
@@ -13,17 +14,26 @@ from livefactory.core.events import (
     Event,
     HumanDecision,
     Outbox,
+    ReleaseOutcome,
+    ReleaseReceipt,
     ResultKind,
     ResultPayload,
     SubmitWorkflow,
     Verdict,
 )
+from livefactory.core.ids import ULID_ALPHABET
 from livefactory.core.model import FactoryState, Revisions, empty_state
 from livefactory.core.reducer import Transition, apply
 
 WF = "wf1"
 REVS = Revisions(profile="compact@1", direction="dir@1", plan="plan@1")
 BUNDLE = "sha256:bundle1"
+
+
+def aid(label: str) -> str:
+    """A stable, valid ULID for a readable test label."""
+    digest = hashlib.sha256(label.encode()).digest()
+    return "0" + "".join(ULID_ALPHABET[byte % 32] for byte in digest[:25])
 
 
 def job(stage: str, occurrence: int = 1) -> str:
@@ -61,7 +71,7 @@ def to_gate() -> list[Event]:
     return [
         submit(),
         *run_attempt(
-            job("plan"), "a-plan", result(ResultKind.SUCCEEDED, "packet_ready", "r-plan", REVS)
+            job("plan"), aid("a-plan"), result(ResultKind.SUCCEEDED, "packet_ready", "r-plan", REVS)
         ),
     ]
 
@@ -74,10 +84,10 @@ def to_release() -> list[Event]:
     return [
         *to_implement(),
         *run_attempt(
-            job("implement"), "a-impl", result(ResultKind.SUCCEEDED, "candidate_ready", "r-impl")
+            job("implement"), aid("a-impl"), result(ResultKind.SUCCEEDED, "candidate_ready", "r-impl")
         ),
         *run_attempt(
-            job("verify"), "a-ver", result(ResultKind.SUCCEEDED, "pass", "r-ver", bundle=BUNDLE)
+            job("verify"), aid("a-ver"), result(ResultKind.SUCCEEDED, "pass", "r-ver", bundle=BUNDLE)
         ),
     ]
 
@@ -94,3 +104,13 @@ def run(events: Iterable[Event], state: FactoryState | None = None) -> tuple[Fac
 
 def outbox(transitions: Iterable[Transition]) -> list[Outbox]:
     return [message for transition in transitions for message in transition.outbox]
+
+
+def release_flow_states() -> list[FactoryState]:
+    """Every state on the way from submission to an activated release."""
+    events = [
+        *to_release(),
+        ReleaseReceipt("rel1", job("release"), BUNDLE, ReleaseOutcome.ACTIVATED, Actor.SUPERVISOR),
+    ]
+    _, transitions = run(events)
+    return [transition.state for transition in transitions]

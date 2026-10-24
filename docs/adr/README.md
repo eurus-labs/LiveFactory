@@ -15,5 +15,6 @@ contract in [`docs/spec/`](../spec/).
 | [0007](0007-implementation-stack.md) | Python 3.12+ with strict typing and property-based tests | Accepted |
 | [0008](0008-first-worker-provider.md) | Claude Code as the first worker provider | Accepted |
 | [0009](0009-self-hosting-first-ring.md) | Ring 0 is self-hosting: the factory improves itself first | Accepted |
+| [0010](0010-stored-state-is-the-source-of-truth.md) | The stored state is the source of truth; events are an audit log | Accepted |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.

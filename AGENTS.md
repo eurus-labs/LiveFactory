@@ -84,6 +84,7 @@ Use Problem → Design → Predict → Build → Validate → Learn.
 - Breaking changes require both `!` and a `BREAKING CHANGE:` footer.
 - Update `CHANGELOG.md` (Keep a Changelog, under the upcoming version) before every PR; keep entries user-facing and summary-only. Parallel PRs conflict there: keep both entries under one version heading, and bump the version once.
 - Release by tagging the default branch with the version (for example `1.2.0`) and publishing a GitHub release; the tag is the version of record. If you cannot create the tag or release, hand the user the tag, the target SHA and the release notes, and stop.
+- Before every release, add or update that version's section in `docs/worth-knowing.md`: the decisions, guarantees, operating rules and sharp edges a reader needs, linking ADRs and spec sections. When a PR changes any of these, update the upcoming version's section in the same PR. CI (`worth-knowing` job) fails once a minor or major version is dated in the CHANGELOG without a released section; patch releases are exempt.
 
 ## This Repository
 
