@@ -470,8 +470,14 @@ second**: a working version fixes a broken one; a broken version never fixes its
   failure they detect: class, signature, versions, time and evidence refs. Writing it is
   deterministic and needs no model. When the Operational Store is unavailable, the
   record goes to a local spool and is imported on recovery.
-- Each open incident becomes a backlog item. Items with the same signature are merged
-  and their count increases; no duplicate items are created.
+- Each incident has an `origin` (`factory`, `extension`, `environment` or `unknown`),
+  assigned by a fixed, protected classification table from deterministic signals only
+  ([ADR-0013](../adr/0013-incident-origin.md)). Origin decides who fixes, never the
+  order: `factory` and `extension` incidents become backlog items; `environment`
+  incidents go to the operator and stay out of the backlog; `unknown` goes to both. The
+  operator can reclassify an incident.
+- Each backlog incident merges with items of the same signature, whose count increases;
+  no duplicate items are created.
 - The next item is chosen by a fixed rule: open incidents first, ordered by class
   (`activation_failed`, `data_integrity`, `crash_loop`, `limit_reached`, others), then
   by count, then by age; then the remaining backlog in the operator's order.

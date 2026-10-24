@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   facts the core checked from what the planner claims. Large work is planned in parts
   and approved once; each part is verified, the original goal is checked at the end,
   and the finished candidate is released once.
+- ADR-0013: each incident records whether it came from the factory, an extension or the
+  environment. Environment failures go to the operator instead of the factory's backlog;
+  priority still follows impact and recurrence.
 
 ### Changed
 
