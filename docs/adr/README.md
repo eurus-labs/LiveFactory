@@ -15,5 +15,6 @@ contract in [`docs/spec/`](../spec/).
 | [0007](0007-implementation-stack.md) | Python 3.12+ with strict typing and property-based tests | Accepted |
 | [0008](0008-first-worker-provider.md) | Claude Code as the first worker provider | Accepted |
 | [0009](0009-self-hosting-first-ring.md) | Ring 0 is self-hosting: the factory improves itself first | Accepted |
+| [0011](0011-supervisor-watch-window.md) | The supervisor watches a new version until it proves itself | Accepted |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.

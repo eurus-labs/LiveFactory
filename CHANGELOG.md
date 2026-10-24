@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocking on conflicting results,
   covered by scenario tests and Hypothesis invariant tests.
 - CI type-checks with pyright (strict) and runs the tests.
+- ADR-0011: after activating a release, the supervisor watches the new version until a
+  workflow passes verification on it or 24 hours pass, and rolls back if the core
+  crash-loops or stalls in that window.
 
 ### Changed
 
