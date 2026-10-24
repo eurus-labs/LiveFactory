@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR-0012: a fixed decision packet format. Revisions become digests of the packet's
   content, decisions are bound to the packet digest, and a static review page separates
   facts the core checked from what the planner claims. Work too large for one packet
-  is split by the planner into smaller backlog items, each with its own approval.
+  is split by the planner into smaller backlog items, each with its own approval, and a
+  final integration item checks the original goal before the parent counts as done.
 
 ### Changed
 

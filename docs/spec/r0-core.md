@@ -317,9 +317,11 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
   the worker reports. A decision names both `covers` and `packet_digest`, and core
   rejects it unless the digest is the gate's current packet.
 - Work that does not fit the packet limits is split by the planner into 2 to 5 backlog
-  items (at most two levels deep), each an ordinary Compact workflow with its own gate.
-  Each child's packet shows its parent and siblings; a child whose dependency failed is
-  `blocked(reason=dependency_failed)`.
+  items, each an ordinary Compact workflow with its own gate, at most two levels deep and
+  12 items per root. The split carries the parent's acceptance tests, and core appends an
+  integration item that depends on every sibling and must pass those tests; the parent
+  is done only when it succeeds. Each child's packet shows its parent and siblings; a
+  child whose dependency failed is `blocked(reason=dependency_failed)`.
 
 Improvement workflow in R0:
 

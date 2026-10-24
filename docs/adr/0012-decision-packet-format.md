@@ -85,23 +85,39 @@ R0 has only the Compact profile, so a task that cannot be explained within the l
 would otherwise be stuck. The planner splits it instead; the owner chose automatic
 splitting over asking a human each time.
 
-- Instead of a packet, the planner may return a `split/1` record: a reason and 2 to 5
-  child items, each with a title (200 characters), a goal (1000 characters) and the
-  indices of the items it depends on. The validator checks the limits and that the
-  dependencies form no cycle.
+- Instead of a packet, the planner may return a `split/1` record: a reason, the
+  parent's **acceptance tests** (up to 20, written before the split so the goal cannot
+  be bent to fit the result), and 2 to 5 child items, each with a title (200
+  characters), a goal (1000 characters) and the indices of the items it depends on. The
+  validator checks the limits and that the dependencies form no cycle.
+- Core always appends one more child, the **integration item**, which depends on every
+  sibling. Its verification must run the parent's acceptance tests. The parent counts as
+  done only when its integration item succeeds, so the children are checked together
+  against the original goal, not only one by one.
 - The workflow then ends without building anything (`rejected`, reason `split`), and
   core adds the children to the backlog in dependency order, at the parent's position.
   Open incidents still come first (spec section 12b).
 - Each child is an ordinary Compact workflow with its own packet, human gate,
   verification and benchmark, so the repository stays working after each one. A child
   starts only after the children it depends on have succeeded.
-- Splitting goes at most two levels deep. A depth-2 item that still does not fit is
-  `blocked(reason=too_large)` and waits for a human.
+- **Limits** (operator configuration in the protected set; defaults shown):
+  - `split_children`: 2 to 5 planner items per split, plus the integration item;
+  - `split_depth`: 2 levels below the root item. Each level has its own integration
+    item, so verification climbs back up level by level to the root's acceptance tests;
+  - `split_items_per_root`: 12 items in total under one root, integration items
+    included;
+  - a split counts as one execution of the plan stage, like any other plan result.
+- An item that still does not fit at the depth limit, or a split that would exceed the
+  item limit, is `blocked(reason=too_large)` and waits for a human.
 - A child's packet shows its lineage in the core part: the parent item, every sibling
   with its status, and the depth. A reviewer judging one small slice always sees the
   whole change it belongs to.
-- If a child fails or is rejected, the siblings that depend on it are `blocked` with
-  reason `dependency_failed` instead of running on a partial base.
+- If a child fails or is rejected, the siblings that depend on it, including the
+  integration item, are `blocked` with reason `dependency_failed` instead of running on
+  a partial base.
+- If the integration item's verification fails, it reworks within its normal stage
+  limits like any implementation; when those run out it blocks for a human, and the
+  parent is not done.
 
 ### Review page
 
@@ -128,7 +144,11 @@ splitting over asking a human each time.
 - The step-2 fake worker reports revisions directly; step 3 replaces that with the
   validator. The `decide` command gains a packet digest argument when packets exist.
 - Changing `packet/1` or `split/1` is operator maintenance and needs a new ADR.
-- The built-in workflow gains a `split` route on the plan stage in step 3.
+- The built-in workflow gains a `split` route on the plan stage in step 3. The
+  integration item uses the same workflow, so R0 keeps a single workflow definition.
+- Open for step 3: an integration item whose acceptance tests already pass needs no
+  code change, so its release carries an unchanged bundle. How the supervisor records
+  that without a swap is decided with the release implementation.
 
 ## Alternatives considered
 
