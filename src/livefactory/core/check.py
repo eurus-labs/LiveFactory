@@ -10,7 +10,7 @@ from __future__ import annotations
 from livefactory.core.model import (
     ATTEMPT_ACTIVE,
     JOB_EXECUTING,
-    RELEASE_WAIT_REASONS,
+    JOB_TERMINAL,
     WORKFLOW_TERMINAL,
     AttemptStatus,
     FactoryState,
@@ -38,14 +38,14 @@ def state_violations(state: FactoryState) -> list[str]:
             elif used > stage.max_executions + workflow.extra_executions.get(stage_id, 0):
                 found.append(f"workflow {workflow_id}: stage {stage_id} over its execution limit")
         if workflow.status in WORKFLOW_TERMINAL:
+            # Only the stop protocol ends a workflow, and only once every job
+            # has settled, so a terminal workflow has its ending and no live job.
+            if workflow.ending is not workflow.status:
+                found.append(f"workflow {workflow_id}: terminal without a matching ending")
             for job_id in workflow.job_ids:
                 job = state.jobs.get(job_id)
-                if job is not None and (
-                    job.status in JOB_EXECUTING
-                    or job.status is JobStatus.OUTCOME_UNKNOWN
-                    or (job.status is JobStatus.BLOCKED and job.reason in RELEASE_WAIT_REASONS)
-                ):
-                    found.append(f"workflow {workflow_id}: terminal with unresolved job {job_id}")
+                if job is not None and job.status not in JOB_TERMINAL:
+                    found.append(f"workflow {workflow_id}: terminal with unsettled job {job_id}")
         # Counters only grow, so they are at least what the records show. A
         # job stopped while blocked may never have been admitted: skip it.
         admitted: dict[str, int] = {}

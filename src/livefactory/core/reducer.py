@@ -156,6 +156,7 @@ def dispatchable_jobs(state: FactoryState) -> tuple[str, ...]:
         if (
             job.status is JobStatus.PENDING
             and workflow.ending is None
+            and workflow.status not in WORKFLOW_TERMINAL
             and not workflow.result_conflicts
             and stage.kind is StageKind.WORKER
             and (not stage.requires_approval or approval_covers_current(workflow))
@@ -266,6 +267,7 @@ def _dispatch(tx: _Tx, event: DispatchJob) -> _Handled:
     _require(event.attempt_id not in tx.attempts, "attempt_exists")
     _require(job.status is JobStatus.PENDING, "job_not_pending")
     _require(workflow.ending is None, "workflow_ending")
+    _require(workflow.status not in WORKFLOW_TERMINAL, "workflow_ended")
     _require(not workflow.result_conflicts, "result_conflict")
     _require(stage.kind is StageKind.WORKER, "not_a_worker_stage")
     _require(not stage.requires_approval or approval_covers_current(workflow), "approval_missing")

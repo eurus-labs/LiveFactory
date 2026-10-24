@@ -478,3 +478,11 @@ def test_state_checks_accept_a_job_stopped_at_its_stage_limit() -> None:
     state, _ = run(events)
     assert state.jobs[job("implement", 4)].status is JobStatus.CANCELLED
     assert state_violations(state) == []
+
+
+def test_a_finished_workflow_never_dispatches() -> None:
+    state, _ = run([submit()])
+    finished = replace(state, workflows={WF: replace(state.workflows[WF], status=WorkflowStatus.SUCCEEDED)})
+    assert any("unsettled job" in p for p in state_violations(finished))
+    assert dispatchable_jobs(finished) == ()
+    assert apply(finished, DispatchJob(job("plan"), aid("x"))).receipt.reason == "workflow_ended"
