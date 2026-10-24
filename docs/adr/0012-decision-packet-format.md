@@ -79,6 +79,30 @@ List items are at most 500 characters. The whole planner part is at most 32 KiB.
   digest is not the gate's current packet, so the human approves exactly the text they
   read (spec DecisionRecord already carries `packet_digest`).
 
+### Work that does not fit splits itself
+
+R0 has only the Compact profile, so a task that cannot be explained within the limits
+would otherwise be stuck. The planner splits it instead; the owner chose automatic
+splitting over asking a human each time.
+
+- Instead of a packet, the planner may return a `split/1` record: a reason and 2 to 5
+  child items, each with a title (200 characters), a goal (1000 characters) and the
+  indices of the items it depends on. The validator checks the limits and that the
+  dependencies form no cycle.
+- The workflow then ends without building anything (`rejected`, reason `split`), and
+  core adds the children to the backlog in dependency order, at the parent's position.
+  Open incidents still come first (spec section 12b).
+- Each child is an ordinary Compact workflow with its own packet, human gate,
+  verification and benchmark, so the repository stays working after each one. A child
+  starts only after the children it depends on have succeeded.
+- Splitting goes at most two levels deep. A depth-2 item that still does not fit is
+  `blocked(reason=too_large)` and waits for a human.
+- A child's packet shows its lineage in the core part: the parent item, every sibling
+  with its status, and the depth. A reviewer judging one small slice always sees the
+  whole change it belongs to.
+- If a child fails or is rejected, the siblings that depend on it are `blocked` with
+  reason `dependency_failed` instead of running on a partial base.
+
 ### Review page
 
 - `livefactory review <job>` writes one self-contained HTML file from a fixed template,
@@ -103,7 +127,8 @@ List items are at most 500 characters. The whole planner part is at most 32 KiB.
   this ADR.
 - The step-2 fake worker reports revisions directly; step 3 replaces that with the
   validator. The `decide` command gains a packet digest argument when packets exist.
-- Changing `packet/1` is operator maintenance and needs a new ADR.
+- Changing `packet/1` or `split/1` is operator maintenance and needs a new ADR.
+- The built-in workflow gains a `split` route on the plan stage in step 3.
 
 ## Alternatives considered
 
@@ -114,5 +139,9 @@ List items are at most 500 characters. The whole planner part is at most 32 KiB.
 - **A web console that sends decisions**: deferred by spec section 1, and it would put
   the gate behind a new authenticated service. A static page plus the CLI keeps the
   decision on the existing authenticated path.
+- **Ask a human whenever work is too large**: safe, but the factory stops on every large
+  item; the owner chose automatic splitting with lineage shown at each gate.
+- **Raise the limits for large tasks**: defeats the point of a packet short enough to
+  review carefully.
 - **Render Markdown from the worker safely**: sanitising still lets the worker choose
   what stands out. Plain text with a fixed layout removes the question.

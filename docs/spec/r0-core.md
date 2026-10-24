@@ -316,6 +316,10 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
   `direction_revision` and `plan_revision` are digests of those sections, never labels
   the worker reports. A decision names both `covers` and `packet_digest`, and core
   rejects it unless the digest is the gate's current packet.
+- Work that does not fit the packet limits is split by the planner into 2 to 5 backlog
+  items (at most two levels deep), each an ordinary Compact workflow with its own gate.
+  Each child's packet shows its parent and siblings; a child whose dependency failed is
+  `blocked(reason=dependency_failed)`.
 
 Improvement workflow in R0:
 
