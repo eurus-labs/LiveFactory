@@ -72,7 +72,7 @@ List items are at most 500 characters. The whole planner part is at most 32 KiB.
 
 - A deterministic, protected packet validator checks the planner part when the planning
   attempt's output is published: schema, limits, plain text only, references that
-  resolve. An invalid packet makes the attempt a technical failure (`invalid_packet`),
+  resolve, and for a plan in parts, unique part ids and an acyclic dependency graph. An invalid packet makes the attempt a technical failure (`invalid_packet`),
   counted against its retry limit.
 - The packet is stored in the artifact store by digest. The gate job records
   `packet_digest`.
@@ -89,8 +89,15 @@ whole split must be inside that one packet: parts planned after the approval wou
 plans no human approved (INV-02).
 
 - For large work, `plan` holds **parts** instead of a flat list of steps. A part has a
-  title, a goal, up to 8 steps, its tests, its paths and the indices of the parts it
-  depends on. A part may hold sub-parts, at most two levels deep.
+  stable `part_id` (unique in the plan, chosen by the planner), a title, a goal, up to 8
+  steps, its tests, its paths and the `part_id`s it depends on. A part may hold
+  sub-parts, at most two levels deep.
+- **Dependencies** name siblings only: parts under the same parent, or top-level parts
+  for top-level parts. A sub-part runs inside its parent's place in the order. The
+  validator rejects unknown or duplicate ids, a part that depends on itself, and any
+  cycle (no topological order exists) as `invalid_packet`, before the gate opens, so a
+  human can never approve a plan that cannot start. Parts run in topological order; ties
+  keep the order the planner listed them in.
 - The plan carries **acceptance tests** for the whole task, and for each part that has
   sub-parts. They are written before any code, so the goal cannot be bent to fit the
   result.
@@ -107,8 +114,17 @@ plans no human approved (INV-02).
   - `plan_parts`: 2 to 12 leaf parts in total, at most 6 under one part;
   - `plan_depth`: 2 levels of parts;
   - a multi-part packet may be up to 64 KiB, against 32 KiB for a flat plan;
-  - stage limits apply per part (by default 3 implementation rounds each), so one
-    difficult part cannot use up the others' allowance.
+  - **counter scope**: in a plan with parts, `max_stage_executions` counts per stage
+    *and part* (by default 3 implementation rounds per part), so a four-part plan is
+    not blocked at its fourth part and one difficult part cannot use up the others'
+    allowance. A flat plan is one implicit part, so its limits are unchanged;
+  - **counters follow `part_id`** and survive replanning like every counter (spec
+    section 7). A part that keeps its id keeps its count; a removed part's count stays
+    on record. Renaming a part to reset its count shows in the diff that the new
+    decision covers, and the plan stage's own execution limit bounds the number of
+    replans;
+  - a workflow-wide ceiling still holds: implementation runs in total stay within the
+    per-part limit times the number of leaf parts.
 - A plan that does not fit these limits is `blocked(reason=too_large)` and waits for a
   human.
 - A part that needs a change to the approved tree routes back to planning

@@ -248,7 +248,7 @@ definition with an unbounded cycle or a missing limit.
 |---|---|---|
 | `max_technical_retries` | Re-runs after a technical failure, including a re-run after `outcome_unknown` reconciled as not executed | 2 |
 | `max_handoffs` | Times one job stopped to ask for human input | 3 |
-| `max_stage_executions` | Job occurrences of one stage in one workflow, including rework | 3 for Implementation |
+| `max_stage_executions` | Job occurrences of one stage in one workflow, including rework; for a plan in parts, per stage and part ([ADR-0012](../adr/0012-decision-packet-format.md)) | 3 for Implementation |
 | `execution_timeout` | Wall-clock time of one attempt, enforced by core | per stage |
 | `RuntimeMaxSec` | Hard ceiling in the unit file, enforced by systemd if core hangs | 2 h |
 | `stop_grace` | Time between stop request and forced kill | 10 s |
@@ -258,7 +258,8 @@ Rules:
 - `attempt_no` identifies executions and only increases. It is never compared with a limit.
 - A handoff resume does not consume a technical retry. A technical failure after three
   handoffs still has the full retry allowance.
-- Counters survive restarts, job ID changes and replanning.
+- Counters survive restarts, job ID changes and replanning. In a plan in parts, a part's
+  counters follow its `part_id`.
 - Reaching a limit gives `blocked(reason=retry_limit | handoff_limit | stage_limit)`.
   The operator may stop the workflow or grant a finite, explicit extra allowance that is
   recorded on the instance. Opening a new workflow to bypass a limit is not allowed.
@@ -447,8 +448,10 @@ the minimum:
   observation, the supervisor keeps watching until a workflow submitted after activation
   passes verification or `watch_hours` (default 24) pass, whichever comes first. A core crash
   loop, failed readiness or a stalled dispatch loop in that window recovers to the
-  previous version and records an `activation_failed` incident. A corrupt store enters
-  maintenance instead. After the window, failures are incidents only.
+  previous version and records an `activation_failed` incident. A storage fault
+  (`degraded_store`, confirmed by the supervisor's own storage probe) or a corrupt store
+  does not trigger recovery: the previous version shares the storage, so section 15.2
+  applies and a persistent fault enters maintenance. After the window, failures are incidents only.
 - Activation is allowed only when verification showed **both** directions: the candidate
   processes state written by the baseline, and the baseline processes state written by the
   candidate. Breaking schema changes are not activated in R0.

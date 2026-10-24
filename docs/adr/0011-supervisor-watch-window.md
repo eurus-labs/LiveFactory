@@ -34,10 +34,18 @@ verified before activation. The owner's priority is that the factory keeps runni
   - the core unit hitting its systemd start limit, or failing readiness;
   - the dispatch loop showing no progress within its deadline while a job is ready.
 - It does **not** recover on:
+  - a storage fault: core in `degraded_store` (spec section 15.2) because the disk is
+    full, the filesystem is read-only or storage I/O fails. The previous version uses
+    the same storage and would fail the same way. The supervisor waits, follows section
+    15.2 and enters maintenance if the fault persists, and the incident is recorded as
+    an environment failure, not `activation_failed`;
   - a corrupt or incompatible store (code rollback does not restore data); it enters
     maintenance;
   - workers failing their stages. Those are workflow outcomes and incidents, not core
     health.
+- Before any recovery, the supervisor probes storage itself (free space and a test write
+  in the store's directory). A failing probe means a storage fault, so it does not
+  recover, even when the visible symptom is a crash loop or failed readiness.
 - Recovery follows the same steps as activation: journal the intent, quiesce, swap,
   start, observe. Unknown worker effects block it and lead to maintenance. It needs no
   new approval because `previous` is inside the range the human approved.
