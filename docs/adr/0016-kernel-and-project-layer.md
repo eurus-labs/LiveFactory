@@ -36,8 +36,20 @@ itself, which is right for Ring 0 but must not leak into the kernel.
   - Supervisor and Release Store mechanism.
   - Protocols and floors: `packet/1`, incident records, the gate floor, invariants,
     limits, reconciliation.
-  - **Slots** with fixed interfaces for departments and for knowledge. A slot defines
-    what goes in and out; it does not choose the model or the prompts.
+  - **Slots** with fixed interfaces for departments and for knowledge. A slot is a
+    contract: what goes in and out, the effect class, and its version. It does not
+    choose the model or the prompts.
+  - The means to check an extension against a slot, which stay distinct:
+    - **Plumber** checks statically, before anything runs: the extension's descriptor
+      and schemas match the slot, versions are pinned, permissions and effect class fit
+      the scope, fixtures map correctly, and routes keep the gate floor. Its output is an
+      accepted wiring plan, which core then uses. It never approves business choices or
+      replaces active wiring on its own (target architecture section 3).
+    - The **conformance suite** (Ring 1) checks behavior: the extension does what the
+      contract says when it actually runs. Matching schemas do not prove matching
+      meaning, so Plumber alone is not enough.
+    - **Core and the worker units** run the extension through the slot at execution
+      time.
 - **Project layer**: everything that belongs to one project.
   - Workflow definitions, loaded through Plumber and never below the gate floor.
   - Department prompts, skills and tools.
@@ -81,7 +93,8 @@ itself, which is right for Ring 0 but must not leak into the kernel.
 - A project cannot fix a kernel bug itself; it waits for a home release or pins an older
   version. Urgent cases go through the operator, as break-glass does today.
 - The slot interfaces become contracts. Changing one is a kernel change with a version
-  bump, and the conformance suite (Ring 1) checks extensions against it.
+  bump. Plumber checks every extension against it before wiring, and the conformance
+  suite (Ring 1) checks its behavior.
 - Step 3 gains one small task: move the built-in workflow out of core.
 
 ## Alternatives considered
