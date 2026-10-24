@@ -316,12 +316,11 @@ DecisionRecord.covers = [profile_revision, direction_revision, plan_revision]
   `direction_revision` and `plan_revision` are digests of those sections, never labels
   the worker reports. A decision names both `covers` and `packet_digest`, and core
   rejects it unless the digest is the gate's current packet.
-- Work that does not fit the packet limits is split by the planner into 2 to 5 backlog
-  items, each an ordinary Compact workflow with its own gate, at most two levels deep and
-  12 items per root. The split carries the parent's acceptance tests, and core appends an
-  integration item that depends on every sibling and must pass those tests; the parent
-  is done only when it succeeds. Each child's packet shows its parent and siblings; a
-  child whose dependency failed is `blocked(reason=dependency_failed)`.
+- Large work is planned in parts (2 to 12 leaf parts, at most two levels) inside one
+  packet, approved by **one** decision. The workflow implements and verifies each part
+  in dependency order on one candidate, runs integration checks against the acceptance
+  tests written with the plan, and releases once. Only a change to the approved tree
+  needs a new decision.
 
 Improvement workflow in R0:
 
