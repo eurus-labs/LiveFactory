@@ -18,5 +18,6 @@ contract in [`docs/spec/`](../spec/).
 | [0010](0010-stored-state-is-the-source-of-truth.md) | The stored state is the source of truth; events are an audit log | Accepted |
 | [0011](0011-supervisor-watch-window.md) | The supervisor watches a new version until it proves itself | Accepted |
 | [0012](0012-decision-packet-format.md) | A fixed decision packet format with core-computed revisions | Accepted |
+| [0013](0013-incident-origin.md) | Incident origin decides who fixes, not how urgently | Accepted |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.
