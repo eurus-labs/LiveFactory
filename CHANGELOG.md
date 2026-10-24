@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Step-2 dev harness: a fake worker and a simulated supervisor for dev-mode stores.
 - `docs/worth-knowing.md`: per-release notes on decisions, guarantees and sharp edges.
   CI requires a section for every released minor and major version.
+- ADR-0011: after activating a release, the supervisor watches the new version until a
+  workflow passes verification on it or 24 hours pass, and rolls back if the core
+  crash-loops or stalls in that window.
 
 ### Changed
 

@@ -85,7 +85,7 @@ flowchart TD
 | Publisher | Moving output into the artifact store after the worker stops ([ADR-0003](../adr/0003-workspace-output-publishing.md)) | Execute anything from the workspace |
 | Artifact store | `candidates.git` for code and a sha256 object store for everything else | Overwrite or delete an object in R0 |
 | Maintenance commands | Backup, restore, integrity checks, manual rollback | Replay the outbox after a restore |
-| Supervisor | Activation, observation and recovery of an approved release (section 12a) | Review source, call a model, coordinate work |
+| Supervisor | Activation, observation, a watch window and recovery of an approved release (section 12a) | Review source, call a model, coordinate work |
 | Release Store | A directory of immutable bundles plus an activation journal | Live inside the Operational Store |
 | Benchmark harness | Replaying the fixed task set against baseline and candidate | Be changed by the candidate it measures |
 
@@ -426,12 +426,18 @@ the minimum:
   `active`/`previous` pointers, outside the Operational Store and outside every worker
   mount.
 - The supervisor is a deterministic state machine: `ready → activating → observing →
-  ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
+  watching → ready`, or `recovering → ready | maintenance`. Every operation has an ID, a journal entry
   and a deadline; after a restart it reads the journal and checks the real target first.
 - Steps: preflight (decision, digests, health) → quiesce (stop dispatch; the building job
   has already ended) → activate (journal intent, swap the target, start) → observe
   (readiness, one read and write cycle, dispatch loop health) → record the receipt.
   On failure: recover to the previous version, or enter maintenance.
+- **Watch window** ([ADR-0011](../adr/0011-supervisor-watch-window.md)): after
+  observation, the supervisor keeps watching until a workflow passes verification on the
+  new version or `watch_hours` (default 24) pass, whichever comes first. A core crash
+  loop, failed readiness or a stalled dispatch loop in that window recovers to the
+  previous version and records an `activation_failed` incident. A corrupt store enters
+  maintenance instead. After the window, failures are incidents only.
 - Activation is allowed only when verification showed **both** directions: the candidate
   processes state written by the baseline, and the baseline processes state written by the
   candidate. Breaking schema changes are not activated in R0.
