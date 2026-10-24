@@ -22,5 +22,6 @@ live in [`docs/plan/`](../plan/), not in ADRs ([ADR-0014](0014-plans-live-outsid
 | [0013](0013-incident-origin.md) | Incident origin decides who fixes, not how urgently | Accepted |
 | [0014](0014-plans-live-outside-adrs.md) | ADRs record design drivers; plans live outside them | Accepted |
 | [0015](0015-knowledge-layer-openwiki.md) | Start the knowledge layer with an isolated OpenWiki | Proposed |
+| [0016](0016-kernel-and-project-layer.md) | A shared kernel improved at home; projects improve only their own layer | Accepted |
 
 Template: Status, Date, Context, Decision, Consequences, Alternatives considered.

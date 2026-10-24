@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   priority still follows impact and recurrence.
 - ADR-0015 (proposed): an isolated OpenWiki of the repository for human readers, measured
   with a fixed question set from the start.
+- ADR-0016: a kernel shared by every project and improved only at home; each project pins
+  a kernel version and improves only its own workflows, prompts, skills and knowledge.
 
 ### Changed
 

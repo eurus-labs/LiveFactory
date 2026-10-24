@@ -33,6 +33,8 @@ Claude Code build the factory from outside it.
   - Incident records with origin (ADR-0013).
   - Plumber's schema and descriptor checks for department input and output (target
     architecture section 10).
+  - Move the built-in workflow (`COMPACT_IMPROVEMENT`) out of `core/` into the home project
+    layer; the kernel loads definitions through Plumber (ADR-0016).
 - **Step 4: supervisor and Release Store.**
   - Activation, observation and the watch window (ADR-0011).
   - Release Store with journal and rollback drills (ADR-0004).
